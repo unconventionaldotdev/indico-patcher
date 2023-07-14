@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "indico-patcher"
+version = "0.1.0"
+description = "The Swiss Army knife to customize Indico"
+repository = "https://github.com/unconventionaldotdev/indico-patcher"
+readme = "README.md"
+license = "MIT"
+authors = [
+    "Alejandro Avilés <ome@unconventional.dev>"
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Application Frameworks"
+]
+
+[tool.poetry.dependencies]
+python = ">=3.9.0,<3.11"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

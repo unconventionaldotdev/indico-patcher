@@ -17,6 +17,8 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.9.0,<3.11"
+aenum = "^3.1.15"
+indico = "^3.2.5"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

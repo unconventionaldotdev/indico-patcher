@@ -1,3 +1,7 @@
+[virtualenvs]
+create = true
+in-project = true
+
 [tool.poetry]
 name = "indico-patcher"
 version = "0.1.0"
@@ -23,6 +27,7 @@ indico = "^3.2.5"
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
 ruff = "^0.0.278"
+unbeheader = "^1.2.0"
 
 [build-system]
 requires = ["poetry-core"]

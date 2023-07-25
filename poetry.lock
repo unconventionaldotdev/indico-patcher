@@ -2862,6 +2862,21 @@ files = [
 ]
 
 [[package]]
+name = "unbeheader"
+version = "1.2.0"
+description = "Never fail to maintain your file headers"
+optional = false
+python-versions = ">=3.9.0"
+files = [
+    {file = "unbeheader-1.2.0-py3-none-any.whl", hash = "sha256:dd33d4a7d527dca24027e202b4145575ac93f98420e799a0294dfe47f4a1f502"},
+]
+
+[package.dependencies]
+click = ">=8"
+colorclass = ">=2.2.2"
+pyyaml = ">=6"
+
+[[package]]
 name = "urllib3"
 version = "1.26.15"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
@@ -3109,4 +3124,4 @@ testing = ["big-O", "flake8 (<5)", "jaraco.functools", "jaraco.itertools", "more
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.11"
-content-hash = "bc6fa44e431ec3852f05c22f5c3a6a287a189afabf3cd09e6cb130c0137ea139"
+content-hash = "5d259d5024af846709518391d0a7579ce3c13070f00c4f59b82e9fcc156084bd"

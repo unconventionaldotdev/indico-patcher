@@ -8,7 +8,7 @@ from pytest import raises
 
 from indico.util.enum import RichIntEnum
 
-from indico_patcher.enum import patch_enum
+from indico_patcher.enums import patch_enum
 
 
 class Arcana(Enum):

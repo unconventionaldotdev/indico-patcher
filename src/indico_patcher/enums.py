@@ -7,6 +7,8 @@ from aenum import extend_enum
 
 from indico.util.enum import RichIntEnum
 
+__all__ = ["patch_enum"]
+
 # Attributes used to store data for rich properties in RichEnum
 RICH_ENUM_BASE_ATTRS = ("__titles__", "__css_classess__")
 

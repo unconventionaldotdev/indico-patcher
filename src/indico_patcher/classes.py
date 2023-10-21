@@ -2,7 +2,10 @@
 # Copyright (C) 2023 UNCONVENTIONAL
 
 from collections import defaultdict
+from typing import cast
 
+from .types import ClassWrapper
+from .types import PatchedClass
 from .util import get_members
 from .util import patch_member
 
@@ -21,22 +24,24 @@ SKIPPED_MEMBERS = {
 }
 
 
-def patch_class(cls):
+def patch_class(orig_class: type) -> ClassWrapper:
     """Decorator to patch a given class with members from the decorated class.
 
-    :param cls: The class to patch.
+    :param orig_class: The class to patch.
     :return: A wrapper that takes the patch class.
     """
-    if not isinstance(cls, type):
+    if not isinstance(orig_class, type):
         raise TypeError("Cannot patch instance of classes")
-    if cls.__module__ == "builtins":
+    if orig_class.__module__ == "builtins":
         raise TypeError("Cannot patch built-in classes")
+    # Hint type checker that the class becomes a PatchedClass
+    cls = cast(PatchedClass, orig_class)
     # Add list to store the patches of the class
     cls.__patches__ = getattr(cls, "__patches__", [])
     # Add dictionary to store the original members of the class
     cls.__unpatched__ = getattr(cls, "__unpatched__", defaultdict(dict))
 
-    def wrapper(patch_class):
+    def wrapper(patch_class: type) -> type:
         # Keep a reference to the patch class
         cls.__patches__.append(patch_class)
         # Inject members of the patch class into the original class

@@ -1,20 +1,30 @@
 # This file is part of indico-patcher.
 # Copyright (C) 2023 UNCONVENTIONAL
 
+from __future__ import annotations
+
 import sys
+from collections.abc import Callable
 from functools import partial
+from types import FrameType
 from types import FunctionType
+from types import MappingProxyType
+from typing import Any
 
 from sqlalchemy.ext.hybrid import hybrid_property
+
+from .types import PatchedClass
+from .types import methodlike
+from .types import propertylike
 
 
 class SuperProxy:
     """A proxy for super that allows calling the original class' methods."""
 
-    def __init__(self, orig_class):
+    def __init__(self, orig_class: PatchedClass) -> None:
         self.orig_class = orig_class
 
-    def __call__(self, patch_class=None, obj=None):
+    def __call__(self, patch_class: type | None = None, obj: object | None = None) -> Any:
         """Wrapper for calls to super() in the patch class.
 
         :param patch_class: The class to call super() on. Defaults to the class of the caller.
@@ -27,7 +37,7 @@ class SuperProxy:
         class duper:
             """Interceptor for calls to super().getattr() in the patch class."""
 
-            def __getattribute__(self_, name):
+            def __getattribute__(self_, name: str) -> Any:
                 # TODO: Find out how to identify which property descriptor method the call is coming from.
                 # XXX: We default to `fget` because calling `super()` on `fset` and `fdel` is broken in Python.
                 #      Bug report: https://bugs.python.org/issue14965
@@ -51,16 +61,16 @@ class SuperProxy:
                 # Fallback to the original class' member
                 return getattr(obj, name) if obj else getattr(self.orig_class, name)
 
-            def __repr__(self):
+            def __repr__(self) -> str:
                 classname = f"{patch_class.__module__}.{patch_class.__name__}" if patch_class else None
                 return f"<duper: {classname}, {obj}>"
 
         return duper()
 
     @staticmethod
-    def _get_defaults():
+    def _get_defaults() -> tuple[type | None, object | None]:
         """Get the class and instance of the caller."""
-        frame = sys._getframe(1)
+        frame: FrameType | None = sys._getframe(1)
         while frame:
             cls = frame.f_locals.get("__class__")
             self = frame.f_locals.get("self")
@@ -70,7 +80,7 @@ class SuperProxy:
         return None, None
 
 
-def get_members(cls):
+def get_members(cls: type) -> MappingProxyType[str, Any]:
     """Get a dictionary of all the members of the base classes up to object."""
     if cls is object:
         raise TypeError("Cannot get members for object")
@@ -79,10 +89,10 @@ def get_members(cls):
         if base is object:
             continue
         dicts.insert(0, get_members(base))
-    return {k: v for d in dicts for k, v in d.items()}
+    return MappingProxyType({k: v for d in dicts for k, v in d.items()})
 
 
-def patch_member(orig_class, member_name, member):
+def patch_member(orig_class: PatchedClass, member_name: str, member: Any) -> None:
     """Patch a member in a class.
 
     :param orig_class: The class to patch
@@ -106,7 +116,7 @@ def patch_member(orig_class, member_name, member):
         _patch_attr(orig_class, member_name, member)
 
 
-def _patch_attr(orig_class, attr_name, attr):
+def _patch_attr(orig_class: PatchedClass, attr_name: str, attr: Any) -> None:
     """Patch an attribute in a class.
 
     :param orig_class: The class to patch
@@ -117,7 +127,8 @@ def _patch_attr(orig_class, attr_name, attr):
     setattr(orig_class, attr_name, attr)
 
 
-def _patch_propertylike(orig_class, prop_name, prop, category, fnames):
+def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: propertylike,
+                        category: str, fnames: tuple[str, ...]) -> None:
     """Patch a property-like member in a class.
 
     :param orig_class: The class to patch
@@ -141,7 +152,7 @@ def _patch_propertylike(orig_class, prop_name, prop, category, fnames):
             func.__globals__["super"] = SuperProxy(orig_class)
 
 
-def _patch_methodlike(orig_class, method_name, method, category):
+def _patch_methodlike(orig_class: PatchedClass, method_name: str, method: methodlike, category: str) -> None:
     """Patch a method-like member in a class.
 
     :param orig_class: The class to patch
@@ -156,11 +167,13 @@ def _patch_methodlike(orig_class, method_name, method, category):
     # Replace the original method
     setattr(orig_class, method_name, method)
     # Override super() in the method
-    func = method if isinstance(method, FunctionType) else method.__func__
+    # XXX: Type is declared explicitly and type checking is disabled because mypy
+    #      infers wrong types for classmethods and staticmethods (https://github.com/python/mypy/issues/3482)
+    func: Callable = method if isinstance(method, FunctionType) else method.__func__
     func.__globals__["super"] = SuperProxy(orig_class)
 
 
-def _store_unpatched(orig_class, member_name, category):
+def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) -> None:
     """Store a reference to the original member of a class.
 
     :param orig_class: The class to store the reference in

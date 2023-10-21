@@ -25,9 +25,11 @@ aenum = "^3.1.15"
 indico = "^3.2.5"
 
 [tool.poetry.group.dev.dependencies]
+mypy = "^1.6.1"
 pytest = "^7.4.0"
 pytest-cov = "^4.1.0"
 ruff = "^0.0.278"
+sqlalchemy2-stubs = "^0.0.2a35"
 unbeheader = "^1.2.0"
 
 [build-system]

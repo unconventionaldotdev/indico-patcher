@@ -77,7 +77,7 @@ Runtime patching is a powerful and flexible strategy but it will lead to code th
 
 ## Development
 
-In order to develop `indico-patcher`, you will need to install the project and its dependencies in a virtualenv. This guide assumes that you have the following tools installed and available in your path:
+In order to develop `indico-patcher`, install the project and its dependencies in a virtualenv. This guide assumes that you have the following tools installed and available in your path:
 
 - [`git`](https://git-scm.com/) (available in most systems)
 - [`make`](https://www.gnu.org/software/make/) (available in most systems)
@@ -91,7 +91,7 @@ git clone https://github.com/unconventionaldotdev/indico-patcher
 cd indico-patcher
 ```
 
-Before creating the virtualenv, you probably want to be using the same version of Python that the development of the project is targeting. This is the first version specified in the `.python-version` file and you can install it with `pyenv`:
+Before creating the virtualenv, make sure to be using the same version of Python that the development of the project is targeting. This is the first version specified in the `.python-version` file and you can install it with `pyenv`:
 
 ```sh
 pyenv install

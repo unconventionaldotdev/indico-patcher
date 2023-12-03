@@ -5,6 +5,7 @@
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.tox/
 __pycache__/
 
 # test coverage

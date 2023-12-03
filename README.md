@@ -118,3 +118,9 @@ Run tests with:
 ```sh
 poetry run -- make test
 ```
+
+Run tests against all supported Python versions with:
+
+```sh
+tox
+```

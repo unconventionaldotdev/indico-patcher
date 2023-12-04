@@ -1,0 +1,90 @@
+name: releasing
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check tag version
+        run: |
+          .github/bin/check-version.sh "${GITHUB_REF#refs/tags/v}"
+
+  build:
+    needs: check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install poetry
+        run: |
+          pipx install poetry
+      - name: Build package
+        run: |
+          poetry build
+      - name: Extract changelog
+        run: |
+          .github/bin/extract-changelog.py ${{ github.ref_name }} /tmp/changelog.md
+      - uses: actions/upload-artifact@v3
+        name: Upload build artifacts
+        with:
+          name: wheel
+          retention-days: 7
+          path: ./dist/*.whl
+      - uses: actions/upload-artifact@v3
+        name: Upload changelog
+        with:
+          name: changelog
+          retention-days: 7
+          path: /tmp/changelog.md
+
+  release:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v3
+      - name: Draft release
+        run: >-
+          gh release create
+          --draft
+          --repo ${{ github.repository }}
+          --title ${{ github.ref_name }}
+          --notes-file changelog/changelog.md
+          ${{ github.ref_name }}
+          wheel/*
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  publish:
+    needs: release
+    environment:
+      name: pypi
+      url: https://pypi.org/project/indico-patcher/
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v3
+      - name: Publish package to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: wheel/
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: wheel/
+      - name: Publish release
+        run: >-
+          gh release edit
+          --draft=false
+          --repo ${{ github.repository }}
+          ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}

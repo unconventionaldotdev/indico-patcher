@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # This file is part of indico-patcher.
-# Copyright (C) UNCONVENTIONAL
+# Copyright (C) 2023 UNCONVENTIONAL
 
 import re
 import sys

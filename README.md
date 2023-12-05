@@ -1,5 +1,7 @@
 # Indico Patcher
 
+<!-- XXX: All the links must remain absolute. This README.md file is used to generate the description for the project in PyPI. Relative links will not work in PyPI. -->
+
 The Swiss Army knife for [Indico](https://getindico.io/) plugin development.
 
 Indico plugin development primarily relies on [`flask-pluginengine`](https://github.com/indico/flask-pluginengine), [Jinja](https://github.com/pallets/jinja) template hooks or core [signals](https://github.com/indico/indico/tree/master/indico/core/signals) to extend and modify system functionality. This, however, falls short in many other cases. Indico Patcher offers a clean interface to patch Indico code at runtime, allowing for things such as:
@@ -9,7 +11,7 @@ Indico plugin development primarily relies on [`flask-pluginengine`](https://git
 - Adding new columns and relationships to SQLAlchemy models
 - Adding new members to Enums
 
-For more examples and usage information, please refer to the [patching guide](doc/README.md). For general information about Indico plugin development, please refer to the [official guide](https://docs.getindico.io/en/stable/plugins/). Not yet supported cases are tracked in [TODO.md](TODO.md).
+For more examples and usage information, please refer to the [patching guide](https://github.com/unconventionaldotdev/indico-patcher/blob/master/doc/README.md). For general information about Indico plugin development, please refer to the [official guide](https://docs.getindico.io/en/stable/plugins/). Not yet supported cases are tracked in [TODO.md](https://github.com/unconventionaldotdev/indico-patcher/blob/master/TODO.md).
 
 ## Installation
 
@@ -62,7 +64,7 @@ class _UserTitle(RichIntEnum):
     rev = 3
 ```
 
-For more examples and usage information, please refer to the [patching guide](doc/README.md).
+For more examples and usage information, please refer to the [patching guide](https://github.com/unconventionaldotdev/indico-patcher/blob/master/doc/README.md).
 
 ### Caveats
 

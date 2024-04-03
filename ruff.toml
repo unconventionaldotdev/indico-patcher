@@ -1,5 +1,7 @@
 target-version = "py312"
 line-length = 120
+
+[lint]
 select = [
   "B",     # flake8-bugbear
   "D",     # pycodestyle
@@ -21,13 +23,13 @@ ignore = [
 ]
 task-tags = ["TODO", "FIXME", "XXX", "HACK"]
 
-[isort]
+[lint.isort]
 force-single-line = true
 known-first-party = ["indico_patcher"]
 section-order = ["future", "standard-library", "third-party", "indico", "first-party", "local-folder"]
 
-[isort.sections]
+[lint.isort.sections]
 indico = ["indico"]
 
-[pydocstyle]
+[lint.pydocstyle]
 convention = "google"

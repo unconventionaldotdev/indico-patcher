@@ -21,9 +21,9 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.9.0,<3.12"
+python = ">=3.12.2,<3.13"
 aenum = ">=3.1.15"
-indico = ">=3.2"
+indico = ">=3.3"
 
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.6.1"

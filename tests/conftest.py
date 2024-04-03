@@ -1,5 +1,5 @@
 # This file is part of indico-patcher.
-# Copyright (C) 2023 UNCONVENTIONAL
+# Copyright (C) 2023 - 2024 UNCONVENTIONAL
 
 import pytest
 from sqlalchemy import create_engine

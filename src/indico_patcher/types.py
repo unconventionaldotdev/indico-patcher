@@ -7,6 +7,7 @@ from collections.abc import Callable
 from enum import EnumMeta
 from types import FunctionType
 from typing import Any
+from typing import TypedDict
 from typing import Union
 
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -24,3 +25,15 @@ PatchWrapper = Union[ClassWrapper, EnumWrapper]  # noqa: UP007
 class PatchedClass:
     __patches__: list[type]
     __unpatched__: dict[str, dict[str, Any]]
+
+
+# Dictionary of property descriptor functions
+class PropertyDescriptors(TypedDict, total=False):
+    fget: FunctionType | None
+    fset: FunctionType | None
+    fdel: FunctionType | None
+
+
+# Dictionary of hybrid_property descriptor functions
+class HybridPropertyDescriptors(PropertyDescriptors, total=False):
+    expr: FunctionType | None

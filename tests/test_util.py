@@ -8,7 +8,9 @@ import pytest
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.sql.elements import ClauseElement
 
+from indico_patcher.util import SUPER_ENABLED_DESCRIPTORS
 from indico_patcher.util import SuperProxy
+from indico_patcher.util import _inject_super_proxy
 from indico_patcher.util import _patch_attr
 from indico_patcher.util import _patch_methodlike
 from indico_patcher.util import _patch_propertylike
@@ -44,6 +46,50 @@ def Fool():
 
     return Fool
 
+
+@pytest.fixture
+def _Fool():
+    class _Fool:
+        @property
+        def prop(self):
+            pass
+
+        @prop.setter
+        def prop(self, value):
+            pass
+
+        @prop.deleter
+        def prop(self):
+            pass
+
+        @hybrid_property
+        def hprop(self):
+            pass
+
+        @hprop.setter
+        def hprop(self, value):
+            pass
+
+        @hprop.deleter
+        def hprop(self):
+            pass
+
+        @hprop.expression
+        def hprop(cls):
+            return ClauseElement()
+
+        @staticmethod
+        def smeth():
+            pass
+
+        @classmethod
+        def cmeth(cls):
+            pass
+
+        def meth(self):
+            pass
+
+    return _Fool
 
 # -- super proxy ---------------------------------------------------------------
 
@@ -107,17 +153,19 @@ def test_patch_member_for_attribute(Fool):
 
 @mock.patch("indico_patcher.util._patch_propertylike")
 def test_patch_member_for_propertylike(_patch_propertylike, Fool):
+    prop = Fool.__dict__["prop"]
     patch_member(Fool, "prop", Fool.prop)
-    _patch_propertylike.assert_called_with(Fool, "prop", Fool.prop, "properties", ("fget",))
+    _patch_propertylike.assert_called_with(Fool, "prop", prop, "properties", ("fget", "fset", "fdel"))
     hprop = Fool.__dict__["hprop"]
     patch_member(Fool, "hprop", hprop)
-    _patch_propertylike.assert_called_with(Fool, "hprop", hprop, "hybrid_properties", ("fget", "expression"))
+    _patch_propertylike.assert_called_with(Fool, "hprop", hprop, "hybrid_properties", ("fget", "fset", "fdel", "expr"))
 
 
 @mock.patch("indico_patcher.util._patch_methodlike")
 def test_patch_member_for_methodlike(_patch_methodlike, Fool):
+    meth = Fool.__dict__["meth"]
     patch_member(Fool, "meth", Fool.meth)
-    _patch_methodlike.assert_called_with(Fool, "meth", Fool.meth, "methods")
+    _patch_methodlike.assert_called_with(Fool, "meth", meth, "methods")
     smeth = Fool.__dict__["smeth"]
     patch_member(Fool, "smeth", smeth)
     _patch_methodlike.assert_called_with(Fool, "smeth", smeth, "staticmethods")
@@ -145,43 +193,46 @@ def test_patch_propertylike_for_invalid_values(Fool):
         _patch_propertylike(Fool, None, None, "properties", ("foo",))
 
 
-def test_patch_propertylike_for_property(Fool):
-    fnames = ("fget",)
-    orig_prop = Fool.prop
-
-    class _Fool:
-        @property
-        def prop(self):
-            pass
-
-    _patch_propertylike(Fool, "prop", _Fool.prop, "properties", fnames)
-    assert Fool.prop == _Fool.prop
-    assert Fool.__unpatched__["properties"]["prop"] == orig_prop
+@mock.patch("indico_patcher.util._store_unpatched")
+@mock.patch("indico_patcher.util._inject_super_proxy")
+def test_patch_propertylike_for_property(_inject_super_proxy, _store_unpatched, Fool, _Fool):
+    mock_func = mock.Mock()
+    _inject_super_proxy.return_value = mock_func
+    fnames = ("fget", "fset", "fdel")
+    prop = _Fool.__dict__["prop"]
+    _patch_propertylike(Fool, "prop", prop, "properties", fnames)
+    new_prop = Fool.__dict__["prop"]
+    _store_unpatched.assert_called_with(Fool, "prop", "properties")
+    expected_calls = []
     for fname in fnames:
-        func = getattr(Fool.prop, fname)
-        assert isinstance(func.__globals__["super"], SuperProxy)
+        func = getattr(prop, fname)
+        if fname in SUPER_ENABLED_DESCRIPTORS:
+            expected_calls.append(mock.call(func, Fool))
+            assert getattr(new_prop, fname) == mock_func
+        else:
+            assert getattr(new_prop, fname) == func
+    _inject_super_proxy.assert_has_calls(expected_calls)
 
 
-def test_patch_propertylike_for_hybrid_property(Fool):
-    fnames = ("fget", "expression")
-    orig_hprop = Fool.hprop
-
-    class _Fool:
-        @hybrid_property
-        def hprop(self):
-            pass
-
-        @hprop.expression
-        def hprop(cls):
-            return ClauseElement()
-
-    new_hprop = _Fool.__dict__["hprop"]
-    _patch_propertylike(Fool, "hprop", new_hprop, "hybrid_properties", fnames)
-    assert Fool.__dict__["hprop"] == new_hprop
-    assert Fool.__unpatched__["hybrid_properties"]["hprop"] == orig_hprop
+@mock.patch("indico_patcher.util._store_unpatched")
+@mock.patch("indico_patcher.util._inject_super_proxy")
+def test_patch_propertylike_for_hybrid_property(_inject_super_proxy, _store_unpatched, Fool, _Fool):
+    mock_func = mock.Mock()
+    _inject_super_proxy.return_value = mock_func
+    fnames = ("fget", "fset", "fdel", "expr")
+    hprop = _Fool.__dict__["hprop"]
+    _patch_propertylike(Fool, "hprop", hprop, "hybrid_properties", fnames)
+    new_hprop = Fool.__dict__["hprop"]
+    _store_unpatched.assert_called_with(Fool, "hprop", "hybrid_properties")
+    expected_calls = []
     for fname in fnames:
-        func = getattr(new_hprop, fname)
-        assert isinstance(func.__globals__["super"], SuperProxy)
+        func = getattr(hprop, fname)
+        if fname in SUPER_ENABLED_DESCRIPTORS:
+            expected_calls.append(mock.call(func, Fool))
+            assert getattr(new_hprop, fname) == mock_func
+        else:
+            assert getattr(new_hprop, fname) == func
+    _inject_super_proxy.assert_has_calls(expected_calls)
 
 
 # -- method-like ---------------------------------------------------------------
@@ -191,49 +242,73 @@ def test_patch_methodlike_for_invalid_values(Fool):
         _patch_methodlike(Fool, None, None, "properties")
 
 
-def test_patch_methodlike_for_method(Fool):
+@mock.patch("indico_patcher.util._store_unpatched")
+@mock.patch("indico_patcher.util._inject_super_proxy")
+def test_patch_methodlike_for_method(_inject_super_proxy, _store_unpatched, Fool, _Fool):
+    mock_func = mock.Mock()
+    _inject_super_proxy.return_value = mock_func
+    meth = _Fool.__dict__["meth"]
+    _patch_methodlike(Fool, "meth", meth, "methods")
+    _store_unpatched.assert_called_with(Fool, "meth", "methods")
+    _inject_super_proxy.assert_called_with(meth, Fool)
+    assert Fool.meth == mock_func
+
+
+
+@mock.patch("indico_patcher.util._store_unpatched")
+@mock.patch("indico_patcher.util._inject_super_proxy")
+def test_patch_methodlike_for_classmethod(_inject_super_proxy, _store_unpatched, Fool, _Fool):
+    mock_func = mock.Mock()
+    _inject_super_proxy.return_value = mock_func
+    cmeth = _Fool.__dict__["cmeth"]
+    _patch_methodlike(Fool, "cmeth", cmeth, "classmethods")
+    _store_unpatched.assert_called_with(Fool, "cmeth", "classmethods")
+    _inject_super_proxy.assert_called_with(cmeth.__func__, Fool)
+    assert Fool.cmeth.__func__ == mock_func
+
+
+@mock.patch("indico_patcher.util._store_unpatched")
+@mock.patch("indico_patcher.util._inject_super_proxy")
+def test_patch_methodlike_for_staticmethod(_inject_super_proxy, _store_unpatched, Fool, _Fool):
+    mock_func = mock.Mock()
+    _inject_super_proxy.return_value = mock_func
+    smeth = _Fool.__dict__["smeth"]
+    _patch_methodlike(Fool, "smeth", smeth, "staticmethods")
+    _store_unpatched.assert_called_with(Fool, "smeth", "staticmethods")
+    _inject_super_proxy.assert_called_with(smeth.__func__, Fool)
+    assert Fool.smeth == mock_func
+
+
+# -- store unpatched member ----------------------------------------------------
+
+@pytest.mark.parametrize(("member_name", "category"), [
+    ("attr", "attributes"),
+    ("prop", "properties"),
+    ("hprop", "hybrid_properties"),
+    ("meth", "methods"),
+    ("cmeth", "classmethods"),
+    ("smeth", "staticmethods"),
+])
+def test_store_unpatched_member(member_name, category, Fool):
+    _store_unpatched(Fool, member_name, category)
+    assert Fool.__unpatched__[category][member_name] == Fool.__dict__[member_name]
+
+
+# -- inject super proxy --------------------------------------------------------
+
+def test_inject_super_proxy(Fool):
     orig_meth = Fool.meth
 
     class _Fool:
         def meth(self):
             pass
 
-    _patch_methodlike(Fool, "meth", _Fool.meth, "methods")
-    assert Fool.meth == _Fool.meth
-    assert Fool.__unpatched__["methods"]["meth"] == orig_meth
-    assert isinstance(Fool.meth.__globals__["super"], SuperProxy)
-
-
-def test_patch_methodlike_for_classmethod(Fool):
-    orig_cmeth = Fool.cmeth
-
-    class _Fool:
-        @classmethod
-        def cmeth(cls):
-            pass
-
-    _patch_methodlike(Fool, "cmeth", _Fool.cmeth, "classmethods")
-    assert Fool.cmeth == _Fool.cmeth
-    assert Fool.__unpatched__["classmethods"]["cmeth"] == orig_cmeth
-    assert isinstance(Fool.cmeth.__globals__["super"], SuperProxy)
-
-
-def test_patch_methodlike_for_staticmethod(Fool):
-    orig_smeth = Fool.smeth
-
-    class _Fool:
-        @staticmethod
-        def smeth():
-            pass
-
-    _patch_methodlike(Fool, "smeth", _Fool.smeth, "staticmethods")
-    assert Fool.smeth == _Fool.smeth
-    assert Fool.__unpatched__["staticmethods"]["smeth"] == orig_smeth
-    assert isinstance(Fool.smeth.__globals__["super"], SuperProxy)
-
-
-# -- store unpatched member ----------------------------------------------------
-
-def test_store_unpatched_member(Fool):
-    _store_unpatched(Fool, "attr", "attributes")
-    assert Fool.__unpatched__["attributes"]["attr"] == Fool.attr
+    new_func = _inject_super_proxy(_Fool.meth, Fool)
+    super_proxy = new_func.__globals__["super"]
+    assert "super" not in orig_meth.__globals__
+    assert isinstance(super_proxy, SuperProxy)
+    assert super_proxy.orig_class == Fool
+    assert new_func.__code__ == _Fool.meth.__code__
+    assert new_func.__name__ == _Fool.meth.__name__
+    assert new_func.__defaults__ == _Fool.meth.__defaults__
+    assert new_func.__closure__ == _Fool.meth.__closure__

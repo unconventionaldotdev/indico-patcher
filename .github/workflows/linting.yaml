@@ -21,13 +21,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          cache: 'poetry'
+          cache: "poetry"
       - name: Install package
         run: |
           poetry install
       - name: Run linters
         env:
-          NO_COLORS: true  # Disable colors in ruff output
+          NO_COLORS: true # Disable colors in ruff output
         run: |
           echo "::add-matcher::.github/matchers/ruff.json"
           echo "::add-matcher::.github/matchers/unbehead.json"

@@ -20,7 +20,7 @@ EnumWrapper: TypeAlias = Callable[[EnumMeta], None]  # noqa: UP040
 PatchWrapper: TypeAlias = ClassWrapper | EnumWrapper  # noqa: UP040
 
 # Annotations for extra attributes in patched classes
-class PatchedClass:
+class PatchedClass(type):
     __patches__: list[type]
     __unpatched__: dict[str, dict[str, Any]]
 

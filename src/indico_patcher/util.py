@@ -189,11 +189,11 @@ def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) 
     :param orig_class: The class to store the reference in
     :param member_name: The name of the member to store the reference for
     """
+    orig_members = get_members(orig_class)
     # None can be a valid value for the member, so we need to check if the member is in the class dict
-    if member_name in orig_class.__dict__:
+    if member_name in orig_members:
         # TODO: Log warning if member is already patched
-        member = orig_class.__dict__[member_name]
-        orig_class.__unpatched__[category][member_name] = member
+        orig_class.__unpatched__[category][member_name] = orig_members[member_name]
 
 
 def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> FunctionType:

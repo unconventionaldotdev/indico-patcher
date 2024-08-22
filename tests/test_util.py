@@ -294,6 +294,23 @@ def test_store_unpatched_member(member_name, category, Fool):
     assert Fool.__unpatched__[category][member_name] == Fool.__dict__[member_name]
 
 
+@pytest.mark.parametrize(("member_name", "category"), [
+    ("attr", "attributes"),
+    ("prop", "properties"),
+    ("hprop", "hybrid_properties"),
+    ("meth", "methods"),
+    ("cmeth", "classmethods"),
+    ("smeth", "staticmethods"),
+])
+def test_store_unpatched_member_from_parent(member_name, category, Fool):
+    class Magician(Fool):
+        def spell(self):
+            pass
+
+    _store_unpatched(Magician, member_name, category)
+    assert Fool.__unpatched__[category][member_name] == Fool.__dict__[member_name]
+
+
 # -- inject super proxy --------------------------------------------------------
 
 def test_inject_super_proxy(Fool):

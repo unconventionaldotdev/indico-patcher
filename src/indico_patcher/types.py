@@ -1,25 +1,23 @@
 # This file is part of indico-patcher.
 # Copyright (C) 2023 - 2024 UNCONVENTIONAL
 
-# TODO: Use explicit TypeAlias and | when support for Python 3.9 is dropped
-
 from collections.abc import Callable
 from enum import EnumMeta
 from types import FunctionType
 from typing import Any
+from typing import TypeAlias
 from typing import TypedDict
-from typing import Union
 
 from sqlalchemy.ext.hybrid import hybrid_property
 
 # Attribute type aggregates
-propertylike = Union[property, hybrid_property]  # noqa: UP007
-methodlike = Union[FunctionType, classmethod, staticmethod]  # noqa: UP007
+propertylike: TypeAlias = property | hybrid_property  # noqa: UP040
+methodlike: TypeAlias = FunctionType | classmethod | staticmethod  # noqa: UP040
 
 # Decorator wrapper aliases
-ClassWrapper = Callable[[type], type]
-EnumWrapper = Callable[[EnumMeta], None]
-PatchWrapper = Union[ClassWrapper, EnumWrapper]  # noqa: UP007
+ClassWrapper: TypeAlias = Callable[[type], type]  # noqa: UP040
+EnumWrapper: TypeAlias = Callable[[EnumMeta], None]  # noqa: UP040
+PatchWrapper: TypeAlias = ClassWrapper | EnumWrapper  # noqa: UP040
 
 # Annotations for extra attributes in patched classes
 class PatchedClass:

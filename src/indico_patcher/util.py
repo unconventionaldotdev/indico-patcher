@@ -44,25 +44,33 @@ class SuperProxy:
             """Interceptor for calls to super().getattr() in the patch class."""
 
             def __getattribute__(self_, name: str) -> Any:
+                # Get the code object of the caller to identify which member is being accessed in super()
+                current_code = self._get_caller_code()
+
                 # TODO: Find out how to identify which property descriptor method the call is coming from.
                 # XXX: We default to `fget` because calling `super()` on `fset` and `fdel` is broken in Python.
                 #      Bug report: https://bugs.python.org/issue14965
-                if prop := self.orig_class.__unpatched__["properties"].get(name):
+                if prop := self._get_previous(self.orig_class, "properties", name, current_code):
                     return prop.fget(obj)
 
                 # TODO: Find out how to identify which property descriptor method the call is coming from.
                 # XXX: We currently default to `fget`.
-                if hprop := self.orig_class.__unpatched__["hybrid_properties"].get(name):
+                if hprop := self._get_previous(self.orig_class, "hybrid_properties", name, current_code):
                     return hprop.fget(obj)
 
-                if method := self.orig_class.__unpatched__["methods"].get(name):
+                if method := self._get_previous(self.orig_class, "methods", name, current_code):
                     return partial(method, obj)
 
-                if classmethod := self.orig_class.__unpatched__["classmethods"].get(name):
-                    return partial(classmethod.__func__, self.orig_class)
+                if cmethod := self._get_previous(self.orig_class, "classmethods", name, current_code):
+                    return partial(cmethod.__func__, self.orig_class)
 
-                if staticmethod := self.orig_class.__unpatched__["staticmethods"].get(name):
-                    return partial(staticmethod)
+                if smethod := self._get_previous(self.orig_class, "staticmethods", name, current_code):
+                    return smethod
+
+                # Avoid infinite recursion when the member is missing in the original class
+                # (e.g. new member added in patch class)
+                if name in self.orig_class.__unpatched__["missing"]:
+                    raise AttributeError(f"duper object has no attribute '{name}'")
 
                 # Fallback to the original class' member
                 return getattr(obj, name) if obj else getattr(self.orig_class, name)
@@ -72,6 +80,12 @@ class SuperProxy:
                 return f"<duper: {classname}, {obj}>"
 
         return duper()
+
+    @staticmethod
+    def _get_caller_code() -> Any:
+        """Get the code object of the caller."""
+        frame: FrameType | None = sys._getframe(2)
+        return frame.f_code if frame else None
 
     @staticmethod
     def _get_defaults() -> tuple[type | None, object | None]:
@@ -84,6 +98,29 @@ class SuperProxy:
                 return cls, self
             frame = frame.f_back
         return None, None
+
+    @staticmethod
+    def _get_previous(orig_class: PatchedClass, category: str, name: str, current_code: Any) -> Any:
+        """Get the previous version of a member in a class."""
+        stack = orig_class.__unpatched__[category].get(name, [])
+        # Check if nothing was stored for this member/category
+        if not stack:
+            return None
+        # Use the most recent stored version if the caller identity is unknown
+        if current_code is None:
+            return stack[-1]
+        # Walk newest to oldest looking for the caller's code object
+        for idx in range(len(stack) - 1, -1, -1):
+            candidate = stack[idx]
+            code = getattr(_unwrap_callable(candidate), "__code__", None)
+            if code is current_code:
+                # If the caller is already the first entry, there's no prior version
+                if idx == 0:
+                    return None
+                # Return the immediately previous version
+                return stack[idx - 1]
+        # Fallback to newest stored version if caller not found
+        return stack[-1]
 
 
 def get_members(cls: type) -> MappingProxyType[str, Any]:
@@ -139,7 +176,7 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
     :param orig_class: The class to patch
     :param prop_name: The name of the property-like member to patch in the class
     :param prop: The property-like object to replace the original member with
-    :param category: The category of unpached members to store the original member in
+    :param category: The category of unpatched members to store the original member in
     :param fnames: The names of the property descriptor methods (e.g. fget, fset, fdel)
                    to override super() in
     """
@@ -188,12 +225,17 @@ def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) 
 
     :param orig_class: The class to store the reference in
     :param member_name: The name of the member to store the reference for
+    :param category: The category of unpatched members to store the original member in
     """
+    # TODO: Fail if the member was already patched in any other category
     orig_members = get_members(orig_class)
     # None can be a valid value for the member, so we need to check if the member is in the class dict
     if member_name in orig_members:
-        # TODO: Log warning if member is already patched
-        orig_class.__unpatched__[category][member_name] = orig_members[member_name]
+        orig_class.__unpatched__[category][member_name].append(orig_members[member_name])
+    else:
+        # Since new members are patched into the original class, we need to keep track
+        # if members are missing in the original class to avoid infinite recursion with super().
+        orig_class.__unpatched__["missing"][member_name].append(None)
 
 
 def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> FunctionType:
@@ -205,3 +247,16 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
     globals = func.__globals__.copy()
     globals["super"] = SuperProxy(orig_class)
     return FunctionType(func.__code__, globals, func.__name__, func.__defaults__, func.__closure__)
+
+
+def _unwrap_callable(member: Any) -> Any:
+    """Return the underlying function used for identity comparisons."""
+    if isinstance(member, classmethod):
+        return member.__func__
+    if isinstance(member, staticmethod):
+        return member.__func__
+    if isinstance(member, property):
+        return member.fget
+    if isinstance(member, hybrid_property):
+        return member.fget
+    return member

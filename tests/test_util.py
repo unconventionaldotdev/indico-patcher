@@ -22,7 +22,7 @@ from indico_patcher.util import patch_member
 @pytest.fixture
 def Fool():
     class Fool:
-        __unpatched__ = defaultdict(dict)
+        __unpatched__ = defaultdict(lambda: defaultdict(list))
         attr = None
 
         @property
@@ -181,7 +181,7 @@ def test_patch_attr(Fool):
     obj = object()
     _patch_attr(Fool, "attr", obj)
     assert Fool.attr is obj
-    assert Fool.__unpatched__["attributes"]["attr"] == orig_attr
+    assert Fool.__unpatched__["attributes"]["attr"] == [orig_attr]
 
 
 # -- property-like -------------------------------------------------------------
@@ -291,7 +291,7 @@ def test_patch_methodlike_for_staticmethod(_inject_super_proxy, _store_unpatched
 ])
 def test_store_unpatched_member(member_name, category, Fool):
     _store_unpatched(Fool, member_name, category)
-    assert Fool.__unpatched__[category][member_name] == Fool.__dict__[member_name]
+    assert Fool.__unpatched__[category][member_name] == [Fool.__dict__[member_name]]
 
 
 @pytest.mark.parametrize(("member_name", "category"), [
@@ -308,7 +308,7 @@ def test_store_unpatched_member_from_parent(member_name, category, Fool):
             pass
 
     _store_unpatched(Magician, member_name, category)
-    assert Fool.__unpatched__[category][member_name] == Fool.__dict__[member_name]
+    assert Fool.__unpatched__[category][member_name] == [Fool.__dict__[member_name]]
 
 
 # -- inject super proxy --------------------------------------------------------

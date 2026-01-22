@@ -39,8 +39,11 @@ def patch_class(orig_class: type) -> ClassWrapper:
     # Hint type checker that the class becomes a PatchedClass
     cls = cast(PatchedClass, orig_class)
     # Store patches and original members of the class
-    cls.__patches__ = getattr(cls, "__patches__", [])
-    cls.__unpatched__ = getattr(cls, "__unpatched__", defaultdict(dict))
+    # XXX: We use `__dict__` instead of `getattr` to avoid retrieving patches
+    #      from parent classes, which would cause infinite recursion when
+    #      patching multiple classes in the same hierarchy.
+    cls.__patches__ = cls.__dict__.get("__patches__", [])
+    cls.__unpatched__ = cls.__dict__.get("__unpatched__",defaultdict(lambda: defaultdict(list)))
     # Reset patch storage for subclasses
     cls.__init_subclass__ = classmethod(_create_subclass_patch_reset(cls.__init_subclass__))  # type: ignore[assignment]
 
@@ -64,6 +67,6 @@ def _create_subclass_patch_reset(orig_init_subclass: Callable) -> Callable:
         orig_init_subclass(**kwargs)
         # Reset patch tracking for subclass
         subcls.__patches__ = []
-        subcls.__unpatched__ = defaultdict(dict)
+        subcls.__unpatched__ = defaultdict(lambda: defaultdict(list))
 
     return __init_subclass__

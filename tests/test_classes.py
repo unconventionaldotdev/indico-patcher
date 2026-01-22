@@ -98,14 +98,30 @@ def test_patch_class_multiple_times(Fool):
     class _Fool1:
         attr = None
 
+        def meth(self):
+            super().meth()
+            self.__probe__()
+
     @patch_class(Fool)
     class _Fool2:
         def meth(self):
-            pass
+            super().meth()
+            self.__probe__()
 
     assert Fool.__patches__ == [_Fool1, _Fool2]
-    assert Fool.__unpatched__["attributes"]["attr"] == orig_attr
-    assert Fool.__unpatched__["methods"]["meth"] == orig_meth
+
+    # Test that the original attribute is in the unpatched stack
+    assert Fool.__unpatched__["attributes"]["attr"] == [orig_attr]
+
+    # Test that the original methods are in the unpatched stack
+    unpatched_methods = Fool.__unpatched__["methods"]["meth"]
+    assert len(unpatched_methods) == 2
+    assert unpatched_methods[0] is orig_meth
+    assert unpatched_methods[1].__code__ is _Fool1.meth.__code__
+
+    # Test that the method calls are properly chained through all patches
+    Fool().meth()
+    assert Fool.__probe__.call_count == 3
 
 
 def test_patch_class_with_subclass(Fool):
@@ -133,18 +149,19 @@ def test_subclass_patch_reset(Fool):
     assert Fool.__patches__ == [_Fool]
     # Verify that patch tracking is not injected into the patch class
     assert Magician.__patches__ == []
-    assert Magician.__unpatched__ == defaultdict(dict)
+    assert Magician.__unpatched__ == defaultdict(lambda: defaultdict(list))
+
 
 # -- attributes ----------------------------------------------------------------
 
 def test_patch_class_for_attribute(Fool):
     @patch_class(Fool)
     class _Fool:
-        attr = "patched"
-        foo = "foo"
+        attr = "fool"
+        number = 0
 
-    assert Fool.attr != "attr"
-    assert Fool.foo == "foo"
+    assert Fool.attr == "fool"
+    assert Fool.number == 0
 
 
 def test_patch_class_for_attributes_in_subclass(Fool):
@@ -168,7 +185,7 @@ def test_patch_class_for_attributes_in_subclass(Fool):
 
 # -- properties ----------------------------------------------------------------
 
-def test_patch_class_for_property_with_new(Fool):
+def test_patch_class_for_property(Fool):
     @patch_class(Fool)
     class _Fool:
         @property
@@ -201,8 +218,18 @@ def test_patch_class_for_property_with_super(Fool):
         def prop(self):
             return super().prop + "prop"
 
-    fool = Fool()
-    assert fool.prop == "propprop"
+    assert Fool().prop == "propprop"
+
+
+def test_patch_class_for_new_property_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @property
+        def nprop(self):
+            return super().nprop
+
+    with pytest.raises(AttributeError):
+        Fool().nprop  # noqa: B018
 
 
 def test_patch_class_for_property_with_super_in_subclass(Fool):
@@ -234,7 +261,7 @@ def test_patch_class_for_property_with_super_in_subclass(Fool):
 
 # -- hybrid properties ---------------------------------------------------------
 
-def test_patch_class_for_hybrid_property_with_new(Fool):
+def test_patch_class_for_hybrid_property(Fool):
     @patch_class(Fool)
     class _Fool:
         @hybrid_property
@@ -264,7 +291,7 @@ def test_patch_class_for_hybrid_property_with_super(Fool):
 
 # -- methods -------------------------------------------------------------------
 
-def test_patch_class_for_method_with_new(Fool):
+def test_patch_class_for_method(Fool):
     assert hasattr(Fool, "meth")
 
     @patch_class(Fool)
@@ -297,45 +324,49 @@ def test_patch_class_for_method_with_super_passing_args(Fool):
     Fool.__probe__.assert_called_with("abc", x=1, y=2, z=3)
 
 
-def test_patch_class_for_method_with_super_in_non_patched(Fool):
+def test_patch_class_for_new_method_with_super(Fool):
     @patch_class(Fool)
     class _Fool:
-        def foo(self):
-            super().meth()
+        def nmeth(self):
+            super().nmeth()
 
-    Fool().foo()
-    assert Fool.__probe__.call_count == 1
+    with pytest.raises(AttributeError):
+        Fool().nmeth()
 
 
 def test_patch_class_for_method_with_super_in_subclass(Fool):
+    class Magician(Fool):
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("Magician")
+
+    Magician().meth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("Magician")]
+
     @patch_class(Fool)
     class _Fool:
         def meth(self, arg):
             self.__probe__(arg)
-            super().meth("a")
+            super().meth("_Fool")
 
-    class Magician(Fool):
-        def meth(self, arg):
-            self.__probe__(arg)
-            super().meth("b")
-
-    Magician().meth("c")
-    assert Magician.__probe__.call_args_list == [call("c"), call("b"), call("a")]
+    Magician.__probe__.reset_mock()
+    Magician().meth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("Magician"), call("_Fool")]
 
     @patch_class(Magician)
     class _Magician:
         def meth(self, arg):
             self.__probe__(arg)
-            super().meth("c")
+            super().meth("_Magician")
 
     Magician.__probe__.reset_mock()
-    Magician().meth("d")
-    assert Magician.__probe__.call_args_list == [call("d"), call("c"), call("b"), call("a")]
+    Magician().meth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("_Magician"), call("Magician"), call("_Fool")]
 
 
 # -- classmethods --------------------------------------------------------------
 
-def test_patch_class_for_classmethod_with_new(Fool):
+def test_patch_class_for_classmethod(Fool):
     assert hasattr(Fool, "cmeth")
 
     @patch_class(Fool)
@@ -371,49 +402,53 @@ def test_patch_class_for_classmethod_with_super_passing_args(Fool):
     Fool.__probe__.assert_called_with("abc", x=1, y=2, z=3)
 
 
-def test_patch_class_for_classmethod_with_super_in_non_patched(Fool):
+def test_patch_class_for_new_classmethod_with_super(Fool):
     @patch_class(Fool)
     class _Fool:
         @classmethod
-        def foo(cls):
-            super().cmeth()
+        def ncmeth(cls):
+            super().ncmeth()
 
-    Fool.foo()
-    assert Fool.__probe__.call_count == 1
+    with pytest.raises(AttributeError):
+        Fool.ncmeth()
 
 
 def test_patch_class_for_classmethod_with_super_in_subclass(Fool):
-    @patch_class(Fool)
-    class _Fool:
-        @classmethod
-        def cmeth(cls, arg):
-            cls.__probe__(arg)
-            super().cmeth("a")
-
     class Magician(Fool):
         @classmethod
         def cmeth(cls, arg):
             cls.__probe__(arg)
-            super().cmeth("b")
+            super().cmeth("Magician")
 
-    Magician.cmeth("c")
-    assert Magician.__probe__.call_args_list == [call("c"), call("b"), call("a")]
+    Magician.cmeth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("Magician")]
+
+    @patch_class(Fool)
+    class _Fool:
+        @classmethod
+        def cmeth(cls, arg):
+            cls.__probe__(arg)
+            super().cmeth("_Fool")
+
+    Magician.__probe__.reset_mock()
+    Magician.cmeth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("Magician"), call("_Fool")]
 
     @patch_class(Magician)
     class _Magician:
         @classmethod
         def cmeth(cls, arg):
             cls.__probe__(arg)
-            super().cmeth("c")
+            super().cmeth("_Magician")
 
     Magician.__probe__.reset_mock()
-    Magician.cmeth("d")
-    assert Magician.__probe__.call_args_list == [call("d"), call("c"), call("b"), call("a")]
+    Magician.cmeth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("_Magician"), call("Magician"), call("_Fool")]
 
 
 # -- staticmethods -------------------------------------------------------------
 
-def test_patch_class_for_staticmethod_with_new(Fool):
+def test_patch_class_for_staticmethod(Fool):
     assert hasattr(Fool, "smeth")
 
     @patch_class(Fool)
@@ -460,38 +495,54 @@ def test_patch_class_for_staticmethod_with_super_passing_args(Fool):
     Fool.__probe__.assert_called_with("abc", x=1, y=2, z=3)
 
 
+def test_patch_class_for_new_staticmethod_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @staticmethod
+        def nsmeth():
+            super().nsmeth()
+
+    with pytest.raises(AttributeError):
+        Fool.nsmeth()
+
+
 def test_patch_class_for_staticmethod_with_super_in_subclass(Fool):
+    class Magician(Fool):
+        @staticmethod
+        def smeth(arg):
+            Fool.__probe__(arg)
+            Fool.smeth("Magician")
+
+    Magician.smeth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("Magician")]
+
     @patch_class(Fool)
     class _Fool:
         @staticmethod
         def smeth(arg):
             Fool.__probe__(arg)
-            super().smeth("a")
+            super().smeth("_Fool")
 
-    class Magician(Fool):
-        @staticmethod
-        def smeth(arg):
-            Fool.__probe__(arg)
-            Fool.smeth("b")
 
-    Magician.smeth("c")
-    assert Magician.__probe__.call_args_list == [call("c"), call("b"), call("a")]
+    Magician.__probe__.reset_mock()
+    Magician.smeth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("Magician"), call("_Fool")]
 
     @patch_class(Magician)
     class _Magician:
         @staticmethod
         def smeth(arg):
             Fool.__probe__(arg)
-            super().smeth("c")
+            super().smeth("_Magician")
 
     Magician.__probe__.reset_mock()
-    Magician.smeth("d")
-    assert Magician.__probe__.call_args_list == [call("d"), call("c"), call("b"), call("a")]
+    Magician.smeth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("_Magician"), call("Magician"), call("_Fool")]
 
 
 # -- SQLAlchemy ----------------------------------------------------------------
 
-def test_patch_class_for_db_column_with_new(Fool, db_base, db_session):
+def test_patch_class_for_db_column(Fool, db_base, db_session):
     @patch_class(Fool)
     class _Fool:
         name = Column(String)
@@ -507,7 +558,7 @@ def test_patch_class_for_db_column_with_new(Fool, db_base, db_session):
     assert fool.name == "fool"
 
 
-def test_patch_class_for_relationship_with_new(Fool, db_base, db_session):
+def test_patch_class_for_relationship(Fool, db_base, db_session):
     class Tag(db_base):
         __tablename__ = "tags"
         id = Column(Integer, primary_key=True)

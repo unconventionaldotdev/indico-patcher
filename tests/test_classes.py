@@ -40,15 +40,15 @@ def Fool(db_base):
             return "hprop"
 
         @staticmethod
-        def smeth():
-            Fool.__probe__()
+        def smeth(*args, **kwargs):
+            Fool.__probe__(*args, **kwargs)
 
         @classmethod
-        def cmeth(cls):
-            cls.__probe__()
+        def cmeth(cls, *args, **kwargs):
+            cls.__probe__(*args, **kwargs)
 
-        def meth(self):
-            self.__probe__()
+        def meth(self, *args, **kwargs):
+            self.__probe__(*args, **kwargs)
 
     return Fool
 
@@ -225,6 +225,16 @@ def test_patch_class_for_method_with_super(Fool):
     assert Fool.__probe__.call_count == 2
 
 
+def test_patch_class_for_method_with_super_passing_args(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, *args, **kwargs):
+            super().meth(*args, **{**kwargs, "y": 2, "z": 3})
+
+    Fool().meth("abc", x=1, y=0)
+    Fool.__probe__.assert_called_with("abc", x=1, y=2, z=3)
+
+
 def test_patch_class_for_method_with_super_in_non_patched(Fool):
     @patch_class(Fool)
     class _Fool:
@@ -260,6 +270,17 @@ def test_patch_class_for_classmethod_with_super(Fool):
 
     Fool.cmeth()
     assert Fool.__probe__.call_count == 2
+
+
+def test_patch_class_for_classmethod_with_super_passing_args(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classmethod
+        def cmeth(cls, *args, **kwargs):
+            super().cmeth(*args, **{**kwargs, "y": 2, "z": 3})
+
+    Fool.cmeth("abc", x=1, y=0)
+    Fool.__probe__.assert_called_with("abc", x=1, y=2, z=3)
 
 
 def test_patch_class_for_classmethod_with_super_in_non_patched(Fool):
@@ -309,6 +330,17 @@ def test_patch_class_for_staticmethod_with_super_in_non_patched(Fool):
 
     Fool.foo()
     assert Fool.__probe__.call_count == 1
+
+
+def test_patch_class_for_staticmethod_with_super_passing_args(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @staticmethod
+        def smeth(*args, **kwargs):
+            super().smeth(*args, **{**kwargs, "y": 2, "z": 3})
+
+    Fool.smeth("abc", x=1, y=0)
+    Fool.__probe__.assert_called_with("abc", x=1, y=2, z=3)
 
 
 # -- SQLAlchemy ----------------------------------------------------------------

@@ -2,6 +2,8 @@
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
 from collections import defaultdict
+from collections.abc import Callable
+from typing import Any
 from typing import cast
 
 from .types import ClassWrapper
@@ -36,10 +38,11 @@ def patch_class(orig_class: type) -> ClassWrapper:
         raise TypeError("Cannot patch built-in classes")
     # Hint type checker that the class becomes a PatchedClass
     cls = cast(PatchedClass, orig_class)
-    # Add list to store the patches of the class
+    # Store patches and original members of the class
     cls.__patches__ = getattr(cls, "__patches__", [])
-    # Add dictionary to store the original members of the class
     cls.__unpatched__ = getattr(cls, "__unpatched__", defaultdict(dict))
+    # Reset patch storage for subclasses
+    cls.__init_subclass__ = classmethod(_create_subclass_patch_reset(cls.__init_subclass__))  # type: ignore[assignment]
 
     def wrapper(patch_class: type) -> type:
         # Keep a reference to the patch class
@@ -52,3 +55,15 @@ def patch_class(orig_class: type) -> ClassWrapper:
         return patch_class
 
     return wrapper
+
+
+def _create_subclass_patch_reset(orig_init_subclass: Callable) -> Callable:
+    """Create an __init_subclass__ method that resets patch tracking for subclasses."""
+
+    def __init_subclass__(subcls: PatchedClass, **kwargs: Any) -> None:
+        orig_init_subclass(**kwargs)
+        # Reset patch tracking for subclass
+        subcls.__patches__ = []
+        subcls.__unpatched__ = defaultdict(dict)
+
+    return __init_subclass__

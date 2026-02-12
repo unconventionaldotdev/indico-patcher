@@ -1,7 +1,9 @@
 # This file is part of indico-patcher.
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
+from collections import defaultdict
 from unittest.mock import MagicMock
+from unittest.mock import call
 
 import pytest
 from sqlalchemy import Column
@@ -93,31 +95,45 @@ def test_patch_class_multiple_times(Fool):
     orig_meth = Fool.meth
 
     @patch_class(Fool)
-    class Foo:
+    class _Fool1:
         attr = None
 
     @patch_class(Fool)
-    class Bar:
+    class _Fool2:
         def meth(self):
             pass
 
-    assert Fool.__patches__ == [Foo, Bar]
+    assert Fool.__patches__ == [_Fool1, _Fool2]
     assert Fool.__unpatched__["attributes"]["attr"] == orig_attr
     assert Fool.__unpatched__["methods"]["meth"] == orig_meth
 
 
 def test_patch_class_with_subclass(Fool):
-    class Foo:
+    class TheWorld:
         foo = None
 
     @patch_class(Fool)
-    class Bar(Foo):
+    class _Fool(TheWorld):
         bar = None
 
-    assert Fool.__patches__ == [Bar]
+    # Verify that members of the patch class are injected into the original class
     assert hasattr(Fool, "foo")
     assert hasattr(Fool, "bar")
 
+
+def test_subclass_patch_reset(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        pass
+
+    class Magician(Fool):
+        pass
+
+    # Verify that patch tracking is properly reset in the original class
+    assert Fool.__patches__ == [_Fool]
+    # Verify that patch tracking is not injected into the patch class
+    assert Magician.__patches__ == []
+    assert Magician.__unpatched__ == defaultdict(dict)
 
 # -- attributes ----------------------------------------------------------------
 
@@ -129,6 +145,25 @@ def test_patch_class_for_attribute(Fool):
 
     assert Fool.attr != "attr"
     assert Fool.foo == "foo"
+
+
+def test_patch_class_for_attributes_in_subclass(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        attr = "fool"
+
+    class Magician(Fool):
+        attr = "magician"
+
+    assert Fool.attr == "fool"
+    assert Magician.attr == "magician"
+
+    @patch_class(Magician)
+    class _Magician:
+        attr = "sorcerer"
+
+    assert Fool.attr == "fool"
+    assert Magician.attr == "sorcerer"
 
 
 # -- properties ----------------------------------------------------------------
@@ -168,6 +203,33 @@ def test_patch_class_for_property_with_super(Fool):
 
     fool = Fool()
     assert fool.prop == "propprop"
+
+
+def test_patch_class_for_property_with_super_in_subclass(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @property
+        def prop(self):
+            return super().prop + "-fool"
+
+    class Magician(Fool):
+        @property
+        def prop(self):
+            return super().prop + "-magician"
+
+    fool = Fool()
+    magician = Magician()
+    assert fool.prop == "prop-fool"
+    assert magician.prop == "prop-fool-magician"
+
+    @patch_class(Magician)
+    class _Magician:
+        @property
+        def prop(self):
+            return super().prop + "-sorcerer"
+
+    assert fool.prop == "prop-fool"
+    assert magician.prop == "prop-fool-magician-sorcerer"
 
 
 # -- hybrid properties ---------------------------------------------------------
@@ -245,6 +307,32 @@ def test_patch_class_for_method_with_super_in_non_patched(Fool):
     assert Fool.__probe__.call_count == 1
 
 
+def test_patch_class_for_method_with_super_in_subclass(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("a")
+
+    class Magician(Fool):
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("b")
+
+    Magician().meth("c")
+    assert Magician.__probe__.call_args_list == [call("c"), call("b"), call("a")]
+
+    @patch_class(Magician)
+    class _Magician:
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("c")
+
+    Magician.__probe__.reset_mock()
+    Magician().meth("d")
+    assert Magician.__probe__.call_args_list == [call("d"), call("c"), call("b"), call("a")]
+
+
 # -- classmethods --------------------------------------------------------------
 
 def test_patch_class_for_classmethod_with_new(Fool):
@@ -294,6 +382,35 @@ def test_patch_class_for_classmethod_with_super_in_non_patched(Fool):
     assert Fool.__probe__.call_count == 1
 
 
+def test_patch_class_for_classmethod_with_super_in_subclass(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classmethod
+        def cmeth(cls, arg):
+            cls.__probe__(arg)
+            super().cmeth("a")
+
+    class Magician(Fool):
+        @classmethod
+        def cmeth(cls, arg):
+            cls.__probe__(arg)
+            super().cmeth("b")
+
+    Magician.cmeth("c")
+    assert Magician.__probe__.call_args_list == [call("c"), call("b"), call("a")]
+
+    @patch_class(Magician)
+    class _Magician:
+        @classmethod
+        def cmeth(cls, arg):
+            cls.__probe__(arg)
+            super().cmeth("c")
+
+    Magician.__probe__.reset_mock()
+    Magician.cmeth("d")
+    assert Magician.__probe__.call_args_list == [call("d"), call("c"), call("b"), call("a")]
+
+
 # -- staticmethods -------------------------------------------------------------
 
 def test_patch_class_for_staticmethod_with_new(Fool):
@@ -341,6 +458,35 @@ def test_patch_class_for_staticmethod_with_super_passing_args(Fool):
 
     Fool.smeth("abc", x=1, y=0)
     Fool.__probe__.assert_called_with("abc", x=1, y=2, z=3)
+
+
+def test_patch_class_for_staticmethod_with_super_in_subclass(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @staticmethod
+        def smeth(arg):
+            Fool.__probe__(arg)
+            super().smeth("a")
+
+    class Magician(Fool):
+        @staticmethod
+        def smeth(arg):
+            Fool.__probe__(arg)
+            Fool.smeth("b")
+
+    Magician.smeth("c")
+    assert Magician.__probe__.call_args_list == [call("c"), call("b"), call("a")]
+
+    @patch_class(Magician)
+    class _Magician:
+        @staticmethod
+        def smeth(arg):
+            Fool.__probe__(arg)
+            super().smeth("c")
+
+    Magician.__probe__.reset_mock()
+    Magician.smeth("d")
+    assert Magician.__probe__.call_args_list == [call("d"), call("c"), call("b"), call("a")]
 
 
 # -- SQLAlchemy ----------------------------------------------------------------

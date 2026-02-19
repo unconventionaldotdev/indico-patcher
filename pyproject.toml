@@ -1,39 +1,48 @@
-[virtualenvs]
-create = true
-in-project = true
-prefer-active-python = true
-
-[tool.poetry]
+[project]
 name = "indico-patcher"
 version = "0.2.1"
 description = "The Swiss Army knife to customize Indico"
-repository = "https://github.com/unconventionaldotdev/indico-patcher"
 readme = "README.md"
-license = "MIT"
-authors = [
-    "Alejandro Avilés <ome@unconventional.dev>"
-]
+license = {text = "MIT"}
+requires-python = ">=3.12.2"
+authors = [{name = "Alejandro Avilés", email = "ome@unconventional.dev"}]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Topic :: Software Development",
     "Topic :: Software Development :: Libraries",
-    "Topic :: Software Development :: Libraries :: Application Frameworks"
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "aenum>=3.1.15",
+    "indico>=3.3",
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.12.2,<3.13"
-aenum = ">=3.1.15"
-indico = ">=3.3"
+[dependency-groups]
+dev = [
+    "mypy>=1.11.1",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.3.5",
+    "sqlalchemy2-stubs>=0.0.2a35",
+    "tox>=4.40.0",
+    "unbeheader>=1.3.0",
+]
 
-[tool.poetry.group.dev.dependencies]
-mypy = "^1.11.1"
-pytest = "^7.4.0"
-pytest-cov = "^4.1.0"
-ruff = "^0.3.5"
-sqlalchemy2-stubs = "^0.0.2a35"
-tox = "^4.11.4"
-unbeheader = "^1.3.0"
+[project.urls]
+Repository = "https://github.com/unconventionaldotdev/indico-patcher"
+Documentation = "https://github.com/unconventionaldotdev/indico-patcher/blob/master/doc/README.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/indico_patcher"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/indico_patcher",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"

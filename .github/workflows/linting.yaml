@@ -15,22 +15,16 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install poetry
+      - uses: astral-sh/setup-uv@v4
+      - name: Install dependencies
         run: |
-          pipx install poetry
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          cache: "poetry"
-      - name: Install package
-        run: |
-          poetry install
+          make install
       - name: Run linters
         env:
           NO_COLORS: true # Disable colors in ruff output
         run: |
           echo "::add-matcher::.github/matchers/ruff.json"
           echo "::add-matcher::.github/matchers/unbehead.json"
-          poetry run -- make lint
+          uv run make lint
           echo "::remove-matcher owner=unbehead::"
           echo "::remove-matcher owner=ruff::"

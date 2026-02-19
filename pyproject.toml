@@ -1,6 +1,6 @@
 [project]
 name = "indico-patcher"
-version = "0.2.1"
+version = "0.3.0"
 description = "The Swiss Army knife to customize Indico"
 readme = "README.md"
 license = {text = "MIT"}

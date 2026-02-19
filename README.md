@@ -79,50 +79,47 @@ Runtime patching is a powerful and flexible strategy but it will lead to code th
 
 ## Development
 
-In order to develop `indico-patcher`, install the project and its dependencies in a virtualenv. This guide assumes that you have the following tools installed and available in your path:
+For developing `indico-patcher` you will need to have the following tools installed and available in your path:
 
 - [`git`](https://git-scm.com/) (available in most systems)
 - [`make`](https://www.gnu.org/software/make/) (available in most systems)
-- [`poetry`](https://python-poetry.org/) ([installation guide](https://python-poetry.org/docs/#installation))
-- [`pyenv`](https://github.com/pyenv/pyenv) ([installation guide](https://github.com/pyenv/pyenv#installation))
+- [`uv`](https://github.com/astral-sh/uv) ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
 
-First, clone the repository locally with:
+Clone the repository locally:
 
 ```shell
 git clone https://github.com/unconventionaldotdev/indico-patcher
 cd indico-patcher
 ```
 
-Before creating the virtualenv, make sure to be using the same version of Python that the development of the project is targeting. This is the first version specified in the `.python-version` file and you can install it with `pyenv`:
+Make sure to have the right versions of `python`:
 
 ```sh
-pyenv install
+uv python install  # reads from .python-version
 ```
 
-You may now create the virtualenv and install the project with its dependencies in it with `poetry`:
+Install the project with its dependencies:
 
 ```sh
-poetry install
+make install
 ```
 
 ### Contributing
 
-This project uses GitHub Actions to run the tests and linter on every pull request. You are still encouraged to run the tests and linter locally before pushing your changes.
-
-Run linter checks with:
+Run linters locally before pushing:
 
 ```sh
-poetry run -- make lint
+uv run make lint
 ```
 
 Run tests with:
 
 ```sh
-poetry run -- make test
+uv run make test
 ```
 
-Run tests against all supported Python versions with:
+Tests can be run against all supported Python versions with:
 
 ```sh
-tox
+uv run tox
 ```

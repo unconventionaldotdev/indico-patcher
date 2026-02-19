@@ -15,16 +15,10 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install poetry
+      - uses: astral-sh/setup-uv@v7
+      - name: Install dependencies
         run: |
-          pipx install poetry
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          cache: "poetry"
-      - name: Install package
-        run: |
-          poetry install
+          make install
       - name: Run tests
         run: |
-          poetry run -- make test
+          uv run make test

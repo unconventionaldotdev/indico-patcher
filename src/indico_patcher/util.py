@@ -13,6 +13,8 @@ from typing import cast
 
 from sqlalchemy.ext.hybrid import hybrid_property
 
+from indico.util.decorators import classproperty
+
 from .types import HybridPropertyDescriptors
 from .types import PatchedClass
 from .types import PropertyDescriptors
@@ -52,6 +54,11 @@ class SuperProxy:
                 #      Bug report: https://bugs.python.org/issue14965
                 if prop := self._get_previous(self.orig_class, "properties", name, current_code):
                     return prop.fget(obj)
+
+                if cprop := self._get_previous(self.orig_class, "classproperties", name, current_code):
+                    # Preserve the subclass through which the class property was accessed.
+                    target_class = obj if isinstance(obj, type) else self.orig_class
+                    return cprop.__get__(None, target_class)
 
                 # TODO: Find out how to identify which property descriptor method the call is coming from.
                 # XXX: We currently default to `fget`.
@@ -93,9 +100,9 @@ class SuperProxy:
         frame: FrameType | None = sys._getframe(1)
         while frame:
             cls = frame.f_locals.get("__class__")
-            self = frame.f_locals.get("self")
+            obj = frame.f_locals.get("self", frame.f_locals.get("cls"))
             if cls:
-                return cls, self
+                return cls, obj
             frame = frame.f_back
         return None, None
 
@@ -144,7 +151,9 @@ def patch_member(orig_class: PatchedClass, member_name: str, member: Any) -> Non
     """
     # TODO: Patch relationship
     # TODO: Patch deferred columns
-    if isinstance(member, property):
+    if isinstance(member, classproperty):
+        _patch_propertylike(orig_class, member_name, member, "classproperties", ("fget", "fset", "fdel"))
+    elif isinstance(member, property):
         _patch_propertylike(orig_class, member_name, member, "properties", ("fget", "fset", "fdel"))
     elif isinstance(member, hybrid_property):
         _patch_propertylike(orig_class, member_name, member, "hybrid_properties", ("fget", "fset", "fdel", "expr"))
@@ -180,7 +189,7 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
     :param fnames: The names of the property descriptor methods (e.g. fget, fset, fdel)
                    to override super() in
     """
-    if category not in {"properties", "hybrid_properties"}:
+    if category not in {"properties", "classproperties", "hybrid_properties"}:
         raise ValueError(f"Unsupported category '{category}'")
     if unsupported_fnames := set(fnames) - SUPPORTED_DESCRIPTORS:
         raise ValueError(f"Unsupported descriptor method '{list(unsupported_fnames)[0]}'")
@@ -189,11 +198,18 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
     # Inject super() in the property descriptor methods
     # TODO: Figure out how to avoid casting
     funcs: PropertyDescriptors | HybridPropertyDescriptors = cast(PropertyDescriptors | HybridPropertyDescriptors, {
-        fname: _inject_super_proxy(getattr(prop, fname), orig_class) if fname in SUPER_ENABLED_DESCRIPTORS else
+        fname: _inject_descriptor_super_proxy(getattr(prop, fname), orig_class)
+        if fname in SUPER_ENABLED_DESCRIPTORS else
                getattr(prop, fname)
         for fname in fnames
     })
-    new_prop = property(**funcs) if isinstance(prop, property) else hybrid_property(**funcs)
+    new_prop: propertylike
+    if isinstance(prop, classproperty):
+        new_prop = type(prop)(**funcs)
+    elif isinstance(prop, property):
+        new_prop = property(**funcs)
+    else:
+        new_prop = hybrid_property(**funcs)
     # Replace the original property-like member
     setattr(orig_class, prop_name, new_prop)
 
@@ -249,14 +265,19 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
     return FunctionType(func.__code__, globals, func.__name__, func.__defaults__, func.__closure__)
 
 
+def _inject_descriptor_super_proxy(func: Any, orig_class: PatchedClass) -> Any:
+    """Inject SuperProxy into a property descriptor function."""
+    if isinstance(func, classmethod):
+        return classmethod(_inject_super_proxy(cast(FunctionType, func.__func__), orig_class))
+    return _inject_super_proxy(func, orig_class)
+
+
 def _unwrap_callable(member: Any) -> Any:
     """Return the underlying function used for identity comparisons."""
+    if isinstance(member, (property, hybrid_property)):
+        member = member.fget
     if isinstance(member, classmethod):
         return member.__func__
     if isinstance(member, staticmethod):
         return member.__func__
-    if isinstance(member, property):
-        return member.fget
-    if isinstance(member, hybrid_property):
-        return member.fget
     return member

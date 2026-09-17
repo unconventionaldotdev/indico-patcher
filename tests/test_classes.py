@@ -45,6 +45,11 @@ def Fool(db_base):
         def cprop(cls):
             return cls.__name__
 
+        @strict_classproperty
+        @classmethod
+        def scprop(cls):
+            return cls.__name__
+
         @hybrid_property
         def hprop(self):
             return "hprop"
@@ -267,11 +272,73 @@ def test_patch_class_for_property_with_super_in_subclass(Fool):
     assert magician.prop == "prop-fool-magician-sorcerer"
 
 
-# -- class properties ----------------------------------------------------------
+# -- classproperties ----------------------------------------------------------
+
+def test_patch_class_for_classproperty(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classproperty
+        @classmethod
+        def cprop(cls):
+            return f"{cls.__name__}-patched"
+
+    assert Fool.cprop == "Fool-patched"
+    assert Fool().cprop == "Fool-patched"
+
 
 def test_patch_class_for_classproperty_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classproperty
+        @classmethod
+        def cprop(cls):
+            return super().cprop + "-patched"
+
+    assert Fool.cprop == "Fool-patched"
+    assert Fool().cprop == "Fool-patched"
+
+
+def test_patch_class_for_new_classproperty_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classproperty
+        @classmethod
+        def ncprop(cls):
+            return super().ncprop
+
+    with pytest.raises(AttributeError):
+        Fool.ncprop  # noqa: B018
+
+
+def test_patch_class_for_classproperty_with_super_in_subclass(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classproperty
+        @classmethod
+        def cprop(cls):
+            return super().cprop + "-fool"
+
     class Magician(Fool):
-        pass
+        @classproperty
+        @classmethod
+        def cprop(cls):
+            return super().cprop + "-magician"
+
+    assert Fool.cprop == "Fool-fool"
+    assert Magician.cprop == "Magician-fool-magician"
+
+    @patch_class(Magician)
+    class _Magician:
+        @classproperty
+        @classmethod
+        def cprop(cls):
+            return super().cprop + "-sorcerer"
+
+    assert Fool.cprop == "Fool-fool"
+    assert Magician.cprop == "Magician-fool-magician-sorcerer"
+
+
+def test_patch_class_for_classproperty_multiple_times(Fool):
 
     @patch_class(Fool)
     class _Fool:
@@ -288,10 +355,97 @@ def test_patch_class_for_classproperty_with_super(Fool):
             return super().cprop + "-again"
 
     assert Fool.cprop == "Fool-patched-again"
-    assert Magician.cprop == "Magician-patched-again"
 
 
 def test_patch_class_for_strict_classproperty(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @strict_classproperty
+        @classmethod
+        def scprop(cls):
+            return cls.__name__
+
+    assert Fool.scprop == "Fool"
+    with pytest.raises(AttributeError):
+        Fool().scprop  # noqa: B018
+
+
+def test_patch_class_for_strict_classproperty_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @strict_classproperty
+        @classmethod
+        def scprop(cls):
+            return super().scprop + "-patched"
+
+    assert Fool.scprop == "Fool-patched"
+    with pytest.raises(AttributeError):
+        Fool().scprop  # noqa: B018
+
+
+def test_patch_class_for_new_strict_classproperty_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @strict_classproperty
+        @classmethod
+        def nscprop(cls):
+            return super().nscprop
+
+    with pytest.raises(AttributeError):
+        Fool.nscprop  # noqa: B018
+
+
+def test_patch_class_for_strict_classproperty_with_super_in_subclass(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @strict_classproperty
+        @classmethod
+        def scprop(cls):
+            return super().scprop + "-fool"
+
+    class Magician(Fool):
+        @strict_classproperty
+        @classmethod
+        def scprop(cls):
+            return super().scprop + "-magician"
+
+    assert Fool.scprop == "Fool-fool"
+    assert Magician.scprop == "Magician-fool-magician"
+
+    @patch_class(Magician)
+    class _Magician:
+        @strict_classproperty
+        @classmethod
+        def scprop(cls):
+            return super().scprop + "-sorcerer"
+
+    assert Fool.scprop == "Fool-fool"
+    assert Magician.scprop == "Magician-fool-magician-sorcerer"
+    with pytest.raises(AttributeError):
+        Magician().scprop  # noqa: B018
+
+
+def test_patch_class_for_strict_classproperty_multiple_times(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @strict_classproperty
+        @classmethod
+        def scprop(cls):
+            return super().scprop + "-patched"
+
+    @patch_class(Fool)
+    class _Fool2:
+        @strict_classproperty
+        @classmethod
+        def scprop(cls):
+            return super().scprop + "-again"
+
+    assert Fool.scprop == "Fool-patched-again"
+    with pytest.raises(AttributeError):
+        Fool().scprop  # noqa: B018
+
+
+def test_patch_classproperty_with_strict_classproperty(Fool):
     @patch_class(Fool)
     class _Fool:
         @strict_classproperty
@@ -302,6 +456,18 @@ def test_patch_class_for_strict_classproperty(Fool):
     assert Fool.cprop == "Fool"
     with pytest.raises(AttributeError):
         Fool().cprop  # noqa: B018
+
+
+def test_patch_strict_classproperty_with_classproperty(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classproperty
+        @classmethod
+        def scprop(cls):
+            return cls.__name__
+
+    assert Fool.scprop == "Fool"
+    assert Fool().scprop == "Fool"
 
 
 # -- hybrid properties ---------------------------------------------------------

@@ -56,6 +56,7 @@ class SuperProxy:
                     return prop.fget(obj)
 
                 if cprop := self._get_previous(self.orig_class, "classproperties", name, current_code):
+                    # Preserve the subclass through which the class property was accessed.
                     target_class = obj if isinstance(obj, type) else self.orig_class
                     return cprop.__get__(None, target_class)
 

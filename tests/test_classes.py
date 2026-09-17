@@ -17,6 +17,7 @@ from sqlalchemy.orm.attributes import QueryableAttribute
 from sqlalchemy.sql.elements import ClauseElement
 
 from indico.util.decorators import classproperty
+from indico.util.decorators import strict_classproperty
 
 from indico_patcher.classes import SKIPPED_MEMBERS
 from indico_patcher.classes import patch_class
@@ -269,6 +270,9 @@ def test_patch_class_for_property_with_super_in_subclass(Fool):
 # -- class properties ----------------------------------------------------------
 
 def test_patch_class_for_classproperty_with_super(Fool):
+    class Magician(Fool):
+        pass
+
     @patch_class(Fool)
     class _Fool:
         @classproperty
@@ -284,6 +288,20 @@ def test_patch_class_for_classproperty_with_super(Fool):
             return super().cprop + "-again"
 
     assert Fool.cprop == "Fool-patched-again"
+    assert Magician.cprop == "Magician-patched-again"
+
+
+def test_patch_class_for_strict_classproperty(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @strict_classproperty
+        @classmethod
+        def cprop(cls):
+            return cls.__name__
+
+    assert Fool.cprop == "Fool"
+    with pytest.raises(AttributeError):
+        Fool().cprop  # noqa: B018
 
 
 # -- hybrid properties ---------------------------------------------------------

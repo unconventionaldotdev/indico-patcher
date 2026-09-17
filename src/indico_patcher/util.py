@@ -56,7 +56,8 @@ class SuperProxy:
                     return prop.fget(obj)
 
                 if cprop := self._get_previous(self.orig_class, "classproperties", name, current_code):
-                    return cprop.__get__(None, self.orig_class)
+                    target_class = obj if isinstance(obj, type) else self.orig_class
+                    return cprop.__get__(None, target_class)
 
                 # TODO: Find out how to identify which property descriptor method the call is coming from.
                 # XXX: We currently default to `fget`.
@@ -98,9 +99,9 @@ class SuperProxy:
         frame: FrameType | None = sys._getframe(1)
         while frame:
             cls = frame.f_locals.get("__class__")
-            self = frame.f_locals.get("self")
+            obj = frame.f_locals.get("self", frame.f_locals.get("cls"))
             if cls:
-                return cls, self
+                return cls, obj
             frame = frame.f_back
         return None, None
 
@@ -203,7 +204,7 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
     })
     new_prop: propertylike
     if isinstance(prop, classproperty):
-        new_prop = classproperty(**funcs)
+        new_prop = type(prop)(**funcs)
     elif isinstance(prop, property):
         new_prop = property(**funcs)
     else:

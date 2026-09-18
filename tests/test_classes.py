@@ -282,6 +282,11 @@ def test_patch_class_for_classproperty(Fool):
         def cprop(cls):
             return f"{cls.__name__}-patched"
 
+    cprop = Fool.__dict__["cprop"]
+    assert isinstance(cprop, classproperty)
+    assert hasattr(cprop, "fget")
+    assert hasattr(cprop, "fset")
+    assert hasattr(cprop, "fdel")
     assert Fool.cprop == "Fool-patched"
     assert Fool().cprop == "Fool-patched"
 
@@ -339,7 +344,6 @@ def test_patch_class_for_classproperty_with_super_in_subclass(Fool):
 
 
 def test_patch_class_for_classproperty_multiple_times(Fool):
-
     @patch_class(Fool)
     class _Fool:
         @classproperty
@@ -357,6 +361,8 @@ def test_patch_class_for_classproperty_multiple_times(Fool):
     assert Fool.cprop == "Fool-patched-again"
 
 
+# -- strict classproperties ---------------------------------------------------
+
 def test_patch_class_for_strict_classproperty(Fool):
     @patch_class(Fool)
     class _Fool:
@@ -365,6 +371,11 @@ def test_patch_class_for_strict_classproperty(Fool):
         def scprop(cls):
             return cls.__name__
 
+    scprop = Fool.__dict__["scprop"]
+    assert isinstance(scprop, strict_classproperty)
+    assert hasattr(scprop, "fget")
+    assert hasattr(scprop, "fset")
+    assert hasattr(scprop, "fdel")
     assert Fool.scprop == "Fool"
     with pytest.raises(AttributeError):
         Fool().scprop  # noqa: B018

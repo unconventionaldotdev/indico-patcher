@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.1
+
+- Updated the PyPI publish GitHub Action to support wheel metadata version 2.5.
+
 ## v0.4.0
 
 - Added support for patching `@classproperty` and `@strict_classproperty` members.

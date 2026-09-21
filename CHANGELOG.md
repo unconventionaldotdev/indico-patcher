@@ -1,8 +1,10 @@
 # Changelog
 
-## v0.4.0 (unreleased)
+## v0.4.0
 
-- *Nothing so far*
+- Added support for patching `@classproperty` and `@strict_classproperty` members.
+- Preserved subclass-aware classproperty resolution when patched implementations call `super()`.
+- Added type stubs and extensive test coverage for classproperty patching scenarios.
 
 ## v0.3.2
 

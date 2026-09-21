@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.2
+
+- Updated the PyPI publish GitHub Action to v1.14.2 (Twine 7) to support wheel metadata version 2.5.
+
 ## v0.4.1
 
 - Updated the PyPI publish GitHub Action to support wheel metadata version 2.5.

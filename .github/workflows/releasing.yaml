@@ -73,13 +73,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
       - name: Publish package to Test PyPI
-        uses: pypa/gh-action-pypi-publish@v1.14.0
+        uses: pypa/gh-action-pypi-publish@v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
           attestations: false
           packages-dir: wheel/
       - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.14.0
+        uses: pypa/gh-action-pypi-publish@v1.14.2
         with:
           packages-dir: wheel/
       - name: Publish release

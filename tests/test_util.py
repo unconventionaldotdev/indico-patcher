@@ -2,6 +2,7 @@
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
 from collections import defaultdict
+from functools import wraps
 from unittest import mock
 
 import pytest
@@ -22,6 +23,7 @@ from indico_patcher.util import patch_member
 @pytest.fixture
 def Fool():
     class Fool:
+        __patches__ = []
         __unpatched__ = defaultdict(lambda: defaultdict(list))
         attr = None
 
@@ -349,3 +351,110 @@ def test_inject_super_proxy_keeps_function_attributes(Fool):
     assert new_func.__type_params__ == _Fool.meth.__type_params__
     assert new_func.attr == "attr"
     assert new_func(None) == (1, 2)
+
+
+def test_inject_super_proxy_for_decorated_function(Fool):
+    def helper(value):
+        return value
+
+    def decorator(func):
+        state = []
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            state.append(None)
+            return helper(func(*args, **kwargs))
+        return wrapper
+
+    class _Fool:
+        @decorator
+        def meth(self):
+            return super().meth()
+
+    wrapper = _Fool.__dict__["meth"]
+    inner = wrapper.__wrapped__
+    Fool.__patches__.append(_Fool)
+    new_func = _inject_super_proxy(wrapper, Fool)
+    new_inner = new_func.__wrapped__
+    cells = dict(zip(wrapper.__code__.co_freevars, wrapper.__closure__, strict=True))
+    new_cells = dict(zip(new_func.__code__.co_freevars, new_func.__closure__, strict=True))
+    # The function calling super() is copied with SuperProxy injected
+    assert new_inner is not inner
+    assert new_inner.__code__ is inner.__code__
+    assert new_cells["func"].cell_contents is new_inner
+    assert isinstance(new_inner.__globals__["super"], SuperProxy)
+    assert new_inner.__globals__["super"].orig_class == Fool
+    # The original functions are not altered
+    assert cells["func"].cell_contents is inner
+    assert wrapper.__wrapped__ is inner
+    assert "super" not in inner.__globals__
+    # Other closure cells are shared with the original function
+    assert new_cells["state"] is cells["state"]
+    assert new_cells["helper"] is cells["helper"]
+
+
+def test_inject_super_proxy_for_function_referenced_multiple_times(Fool):
+    def decorator(func):
+        alias = func
+
+        def wrapper(*args, **kwargs):
+            return alias(*args, **kwargs), func(*args, **kwargs)
+        return wrapper
+
+    class _Fool:
+        @decorator
+        def meth(self):
+            return super().meth()
+
+    Fool.__patches__.append(_Fool)
+    new_func = _inject_super_proxy(_Fool.__dict__["meth"], Fool)
+    alias_cell, func_cell = new_func.__closure__
+    assert alias_cell.cell_contents is func_cell.cell_contents
+    assert isinstance(func_cell.cell_contents.__globals__["super"], SuperProxy)
+
+
+def test_inject_super_proxy_for_function_with_empty_cell(Fool):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs), unassigned  # noqa: F821
+        if False:
+            unassigned = None
+        return wrapper
+
+    class _Fool:
+        @decorator
+        def meth(self):
+            return super().meth()
+
+    Fool.__patches__.append(_Fool)
+    new_func = _inject_super_proxy(_Fool.__dict__["meth"], Fool)
+    func_cell, unassigned_cell = new_func.__closure__
+    assert isinstance(func_cell.cell_contents.__globals__["super"], SuperProxy)
+    assert unassigned_cell is _Fool.__dict__["meth"].__closure__[1]
+
+
+def test_inject_super_proxy_for_decorated_function_calling_super_of_other_class(Fool):
+    class Other:
+        def hook(self):
+            return super().hook()
+
+    def hooking(func):
+        hook = Other.hook
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return hook, func(*args, **kwargs)
+        return wrapper
+
+    class _Fool:
+        @hooking
+        def meth(self):
+            return super().meth()
+
+    Fool.__patches__.append(_Fool)
+    wrapper = _Fool.__dict__["meth"]
+    new_func = _inject_super_proxy(wrapper, Fool)
+    new_cells = dict(zip(new_func.__code__.co_freevars, new_func.__closure__, strict=True))
+    assert isinstance(new_cells["func"].cell_contents.__globals__["super"], SuperProxy)
+    assert new_cells["hook"] is wrapper.__closure__[new_func.__code__.co_freevars.index("hook")]
+    assert new_cells["hook"].cell_contents is Other.hook

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 from functools import partial
+from types import CellType
 from types import FrameType
 from types import FunctionType
 from types import MappingProxyType
@@ -262,7 +263,7 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
     """
     globals = func.__globals__.copy()
     globals["super"] = SuperProxy(orig_class)
-    return FunctionType(func.__code__, globals, func.__name__, func.__defaults__, func.__closure__)
+    return _copy_function(func, globals, func.__closure__)
 
 
 def _inject_descriptor_super_proxy(func: Any, orig_class: PatchedClass) -> Any:
@@ -281,3 +282,16 @@ def _unwrap_callable(member: Any) -> Any:
     if isinstance(member, staticmethod):
         return member.__func__
     return member
+
+
+def _copy_function(func: FunctionType, globals: dict[str, Any], closure: tuple[CellType, ...] | None) -> FunctionType:
+    """Return a copy of a function with the given globals and closure."""
+    new_func = FunctionType(func.__code__, globals, func.__name__, func.__defaults__, closure)
+    new_func.__kwdefaults__ = func.__kwdefaults__.copy() if func.__kwdefaults__ else func.__kwdefaults__
+    new_func.__qualname__ = func.__qualname__
+    new_func.__module__ = func.__module__
+    new_func.__doc__ = func.__doc__
+    new_func.__annotations__ = func.__annotations__.copy()
+    new_func.__type_params__ = func.__type_params__
+    new_func.__dict__.update(func.__dict__)
+    return new_func

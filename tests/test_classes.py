@@ -578,6 +578,16 @@ def test_patch_class_for_method_with_super(Fool):
     assert Fool.__probe__.call_count == 2
 
 
+def test_patch_class_for_method_with_keyword_only_defaults(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, *, x=1):
+            super().meth(x=x)
+
+    Fool().meth()
+    Fool.__probe__.assert_called_with(x=1)
+
+
 def test_patch_class_for_method_with_super_passing_args(Fool):
     @patch_class(Fool)
     class _Fool:

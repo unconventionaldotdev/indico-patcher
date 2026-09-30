@@ -329,3 +329,23 @@ def test_inject_super_proxy(Fool):
     assert new_func.__name__ == _Fool.meth.__name__
     assert new_func.__defaults__ == _Fool.meth.__defaults__
     assert new_func.__closure__ == _Fool.meth.__closure__
+
+
+def test_inject_super_proxy_keeps_function_attributes(Fool):
+    class _Fool:
+        def meth[T](self, arg: T = 1, *, kwarg: int = 2) -> tuple[T, int]:
+            """Docstring of the method."""
+            return arg, kwarg
+
+    _Fool.meth.attr = "attr"
+    new_func = _inject_super_proxy(_Fool.meth, Fool)
+    assert new_func.__qualname__ == _Fool.meth.__qualname__
+    assert new_func.__module__ == _Fool.meth.__module__
+    assert new_func.__doc__ == _Fool.meth.__doc__
+    assert new_func.__kwdefaults__ == _Fool.meth.__kwdefaults__
+    assert new_func.__kwdefaults__ is not _Fool.meth.__kwdefaults__
+    assert new_func.__annotations__ == _Fool.meth.__annotations__
+    assert new_func.__annotations__ is not _Fool.meth.__annotations__
+    assert new_func.__type_params__ == _Fool.meth.__type_params__
+    assert new_func.attr == "attr"
+    assert new_func(None) == (1, 2)

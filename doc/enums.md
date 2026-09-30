@@ -40,11 +40,15 @@ class _UserTitle(RichIntEnum):
 
 You can also patch Indico-defined `RichEnum`s and their variants. In this example, new user titles are added. The `__titles__` attribute defines how they should be displayed in the user interface and will be carried over to the original Enum.
 
+`__titles__` and `__css_classes__` are merged (applying `padding`) for any original Enum that defines them, including plain `IndicoIntEnum`s that are not `RichIntEnum`s. If the patch Enum defines one of them but the original Enum does not, it is ignored.
+
+The decorator returns the patch Enum, as it does when patching classes.
+
 ## Inject extra attributes
 
 ```python
 # Overrides the __page_sizes__ of the original PageSize Enum
-@patch(PageSize, padding=100, extra_args=('__page_sizes__',))
+@patch(PageSize, padding=100, extra_attrs=('__page_sizes__',))
 class _PageSize:
     __page_sizes__ = {**PageSize.__page_sizes__, **{
         'A7': pagesizes.A7,
@@ -54,4 +58,4 @@ class _PageSize:
     a8 = 2
 ```
 
-By default, only the attributes used by `RichEnums` properties are carried over to the original Enum (e.g. `__titles__`, `__css_classes__`). Declare any extra attribute that needs to be carried over in the `extra_args` argument of the `@patch` decorator.
+By default, only `__titles__` and `__css_classes__` are carried over (merged) to the original Enum, when it defines them. Declare any extra attribute that needs to be carried over in the `extra_attrs` argument of the `@patch` decorator.

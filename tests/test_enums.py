@@ -2,10 +2,12 @@
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
 from enum import Enum
+from enum import EnumMeta
 
 import pytest
 from pytest import raises
 
+from indico.util.enum import IndicoIntEnum
 from indico.util.enum import RichIntEnum
 
 from indico_patcher.enums import patch_enum
@@ -141,3 +143,89 @@ def test_patch_enum_with_extra_attrs_collision(RichTarotCard):
         @patch_enum(RichTarotCard, extra_attrs=("__titles__",))
         class _TarotCard(Enum):
             pass
+
+
+@pytest.fixture
+def TitledColor():
+    class TitledColor(IndicoIntEnum):
+        __titles__ = ["Red", "Green"]
+        red = 0
+        green = 1
+
+        def get_title(self):
+            return self.__titles__[self.value]
+
+    return TitledColor
+
+
+def test_patch_enum_returns_patch(TarotCard):
+    @patch_enum(TarotCard)
+    class _TarotCard(Enum):
+        the_empress = 3
+
+    assert isinstance(_TarotCard, EnumMeta)
+    assert _TarotCard.the_empress.value == 3
+
+
+def test_patch_non_rich_enum_titles(TitledColor):
+    @patch_enum(TitledColor)
+    class _TitledColor(IndicoIntEnum):
+        __titles__ = ["Blue"]
+        blue = 2
+
+    assert TitledColor.red.get_title() == "Red"
+    assert TitledColor.blue.get_title() == "Blue"
+
+
+def test_patch_non_rich_enum_titles_with_padding(TitledColor):
+    @patch_enum(TitledColor, padding=10)
+    class _TitledColor(IndicoIntEnum):
+        __titles__ = ["Blue"]
+        blue = 0
+
+    assert TitledColor.blue.value == 10
+    assert TitledColor.green.get_title() == "Green"
+    assert TitledColor.blue.get_title() == "Blue"
+
+
+def test_patch_non_rich_enum_titles_missing_in_original(TarotCard):
+    @patch_enum(TarotCard)
+    class _TarotCard(Enum):
+        __titles__ = ["The Empress"]
+        the_empress = 3
+
+    assert not hasattr(TarotCard, "__titles__")
+
+
+def test_patch_non_rich_enum_titles_not_defined_in_patch(TitledColor):
+    @patch_enum(TitledColor)
+    class _TitledColor(IndicoIntEnum):
+        blue = 2
+
+    assert TitledColor.red.get_title() == "Red"
+    assert TitledColor.green.get_title() == "Green"
+    assert TitledColor.blue.value == 2
+
+
+def test_patch_non_rich_enum_titles_in_extra_attrs_collision(TitledColor):
+    with raises(ValueError):
+        @patch_enum(TitledColor, extra_attrs=("__titles__",))
+        class _TitledColor(IndicoIntEnum):
+            pass
+
+
+def test_patch_richenum_css_classes():
+    class Suit(RichIntEnum):
+        __titles__ = ["Cups"]
+        __css_classes__ = ["blue"]
+        cups = 0
+
+    @patch_enum(Suit, padding=5)
+    class _Suit(RichIntEnum):
+        __titles__ = ["Wands"]
+        __css_classes__ = ["red"]
+        wands = 0
+
+    assert Suit.cups.css_class == "blue"
+    assert Suit.wands.title == "Wands"
+    assert Suit.wands.css_class == "red"

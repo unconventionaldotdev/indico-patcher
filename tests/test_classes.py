@@ -1,7 +1,9 @@
 # This file is part of indico-patcher.
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
+import asyncio
 from collections import defaultdict
+from functools import wraps
 from unittest.mock import MagicMock
 from unittest.mock import call
 
@@ -578,6 +580,16 @@ def test_patch_class_for_method_with_super(Fool):
     assert Fool.__probe__.call_count == 2
 
 
+def test_patch_class_for_method_with_keyword_only_defaults(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, *, x=1):
+            super().meth(x=x)
+
+    Fool().meth()
+    Fool.__probe__.assert_called_with(x=1)
+
+
 def test_patch_class_for_method_with_super_passing_args(Fool):
     @patch_class(Fool)
     class _Fool:
@@ -802,6 +814,365 @@ def test_patch_class_for_staticmethod_with_super_in_subclass(Fool):
     Magician.__probe__.reset_mock()
     Magician.smeth("Caller")
     assert Magician.__probe__.call_args_list == [call("Caller"), call("_Magician"), call("Magician"), call("_Fool")]
+
+
+# -- decorated members ---------------------------------------------------------
+
+def wrapping(func):
+    """Decorator that preserves the metadata of the wrapped function."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def closing(func):
+    """Decorator that only keeps the wrapped function in its closure."""
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def suffixing(suffix):
+    """Decorator factory whose wrapper closes over non-function values."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs) + suffix
+        return wrapper
+    return decorator
+
+
+def memoizing(func):
+    """Decorator that keeps a cache in its closure."""
+    cache = {}
+
+    @wraps(func)
+    def wrapper(*args):
+        if args not in cache:
+            cache[args] = func(*args)
+        return cache[args]
+    wrapper.cache = cache
+    return wrapper
+
+
+def counting(func):
+    """Decorator whose wrapper references itself in its closure."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        wrapper.calls += 1
+        return func(*args, **kwargs)
+    wrapper.calls = 0
+    return wrapper
+
+
+def aliasing(func):
+    """Decorator that references the wrapped function from two closure cells."""
+    alias = func
+
+    def wrapper(*args, **kwargs):
+        assert alias is func
+        return func(*args, **kwargs)
+    wrapper.__wrapped__ = func
+    return wrapper
+
+
+def generating(func):
+    """Decorator for generator functions."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        yield from func(*args, **kwargs)
+    return wrapper
+
+
+def awaiting(func):
+    """Decorator for coroutine functions."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        return await func(*args, **kwargs)
+    return wrapper
+
+
+def hooking(hook, target):
+    """Decorator factory whose wrapper calls a function of another class."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return hook(target, func(*args, **kwargs))
+        return wrapper
+    return decorator
+
+
+@pytest.mark.parametrize("decorator", (wrapping, closing, suffixing(""), memoizing, counting, aliasing))
+def test_patch_class_for_decorated_method_with_super(Fool, decorator):
+    @patch_class(Fool)
+    class _Fool:
+        @decorator
+        def meth(self):
+            super().meth()
+            self.__probe__()
+            return "meth"
+
+    assert Fool().meth() == "meth"
+    assert Fool.__probe__.call_count == 2
+
+
+def test_patch_class_for_nested_decorated_method_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @suffixing("-outer")
+        @closing
+        @wrapping
+        @suffixing("-inner")
+        def meth(self):
+            super().meth()
+            return "meth"
+
+    assert Fool().meth() == "meth-inner-outer"
+    assert Fool.__probe__.call_count == 1
+
+
+def test_patch_class_for_decorated_method_with_super_passing_args(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @wrapping
+        def meth(self, *args, y=0, **kwargs):
+            super().meth(*args, **{**kwargs, "y": y, "z": 3})
+
+    Fool().meth("abc", x=1)
+    Fool.__probe__.assert_called_with("abc", x=1, y=0, z=3)
+    Fool().meth("abc", x=1, y=2)
+    Fool.__probe__.assert_called_with("abc", x=1, y=2, z=3)
+
+
+def test_patch_class_for_decorated_method_with_super_multiple_times(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        @wrapping
+        def meth(self):
+            super().meth()
+            self.__probe__("_Fool1")
+
+    @patch_class(Fool)
+    class _Fool2:
+        @wrapping
+        def meth(self):
+            super().meth()
+            self.__probe__("_Fool2")
+
+    Fool().meth()
+    assert Fool.__probe__.call_args_list == [call(), call("_Fool1"), call("_Fool2")]
+
+
+def test_patch_class_for_decorated_method_with_super_in_subclass(Fool):
+    class Magician(Fool):
+        @wrapping
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("Magician")
+
+    @patch_class(Fool)
+    class _Fool:
+        @wrapping
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("_Fool")
+
+    @patch_class(Magician)
+    class _Magician:
+        @closing
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("_Magician")
+
+    Magician().meth("Caller")
+    assert Magician.__probe__.call_args_list == [call("Caller"), call("_Magician"), call("Magician"), call("_Fool")]
+
+
+def test_patch_class_for_decorated_method_keeps_decorator_state(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @memoizing
+        def meth(self, arg):
+            super().meth(arg)
+            return arg
+
+    fool = Fool()
+    assert fool.meth("a") == "a"
+    assert fool.meth("a") == "a"
+    assert fool.meth("b") == "b"
+    assert Fool.__probe__.call_args_list == [call("a"), call("b")]
+    # The cache is shared with the decorated function in the patch class
+    assert Fool.meth.cache is _Fool.meth.cache
+    assert _Fool.meth.cache == {(fool, "a"): "a", (fool, "b"): "b"}
+
+
+def test_patch_class_for_decorated_method_referencing_itself(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @counting
+        def meth(self):
+            super().meth()
+
+    Fool().meth()
+    Fool().meth()
+    assert Fool.__probe__.call_count == 2
+    assert Fool.meth.calls == 2
+    assert _Fool.meth.calls == 0
+
+
+def test_patch_class_for_decorated_method_does_not_alter_patch_class(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @wrapping
+        def meth(self):
+            return super().meth()
+
+    wrapper = _Fool.__dict__["meth"]
+    inner = wrapper.__wrapped__
+    assert Fool.meth is not wrapper
+    assert Fool.meth.__wrapped__ is not inner
+    assert Fool.meth.__wrapped__.__code__ is inner.__code__
+    assert wrapper.__closure__[0].cell_contents is inner
+    assert "super" not in inner.__globals__
+
+
+def test_patch_class_for_decorated_classmethod_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classmethod
+        @wrapping
+        def cmeth(cls):
+            super().cmeth()
+            cls.__probe__()
+
+    Fool.cmeth()
+    assert Fool.__probe__.call_count == 2
+
+
+def test_patch_class_for_decorated_property_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @property
+        @closing
+        def prop(self):
+            return super().prop + "-patched"
+
+    assert Fool().prop == "prop-patched"
+
+
+def test_patch_class_for_decorated_property_with_super_multiple_times(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        @property
+        @wrapping
+        def prop(self):
+            return super().prop + "-fool1"
+
+    @patch_class(Fool)
+    class _Fool2:
+        @property
+        @wrapping
+        def prop(self):
+            return super().prop + "-fool2"
+
+    assert Fool().prop == "prop-fool1-fool2"
+
+
+def test_patch_class_for_decorated_classproperty_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @classproperty
+        @classmethod
+        @wrapping
+        def cprop(cls):
+            return super().cprop + "-patched"
+
+    assert Fool.cprop == "cprop-patched"
+
+
+def test_patch_class_for_decorated_hybrid_property_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @hybrid_property
+        @wrapping
+        def hprop(self):
+            return super().hprop + "-patched"
+
+    assert Fool().hprop == "hprop-patched"
+
+
+def test_patch_class_for_decorated_generator_method_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @generating
+        def meth(self):
+            super().meth()
+            yield "meth"
+
+    assert list(Fool().meth()) == ["meth"]
+    assert Fool.__probe__.call_count == 1
+
+
+def test_patch_class_for_decorated_async_method_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @awaiting
+        async def meth(self):
+            super().meth()
+            return "meth"
+
+    assert asyncio.run(Fool().meth()) == "meth"
+    assert Fool.__probe__.call_count == 1
+
+
+def test_patch_class_for_decorated_staticmethod_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @staticmethod
+        @wrapping
+        def smeth():
+            super().smeth()
+            Fool.__probe__()
+
+    Fool.smeth()
+    assert Fool.__probe__.call_count == 2
+
+
+def test_patch_class_for_decorated_method_with_super_in_mixin(Fool):
+    class Mixin:
+        @wrapping
+        def meth(self):
+            super().meth()
+            self.__probe__("Mixin")
+            return "meth"
+
+    @patch_class(Fool)
+    class _Fool(Mixin):
+        pass
+
+    assert Fool().meth() == "meth"
+    assert Fool.__probe__.call_args_list == [call(), call("Mixin")]
+
+
+def test_patch_class_for_decorated_method_calling_super_of_other_class(Fool):
+    class Base:
+        def hook(self, value):
+            return value + "-base"
+
+    class Other(Base):
+        def hook(self, value):
+            return super().hook(value) + "-other"
+
+    @patch_class(Fool)
+    class _Fool:
+        @hooking(Other.hook, Other())
+        def meth(self):
+            super().meth()
+            return "meth"
+
+    assert Fool().meth() == "meth-base-other"
+    assert Fool.__probe__.call_count == 1
 
 
 # -- SQLAlchemy ----------------------------------------------------------------

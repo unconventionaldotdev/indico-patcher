@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from functools import partial
 from types import FrameType
 from types import FunctionType
@@ -11,6 +12,7 @@ from types import MappingProxyType
 from typing import Any
 from typing import cast
 
+from sqlalchemy.ext.hybrid import hybrid_method
 from sqlalchemy.ext.hybrid import hybrid_property
 
 from indico.util.decorators import classproperty
@@ -65,6 +67,9 @@ class SuperProxy:
                 if hprop := self._get_previous(self.orig_class, "hybrid_properties", name, current_code):
                     return hprop.fget(obj)
 
+                if hmethod := self._get_previous_hybrid_method(self.orig_class, name, current_code, obj):
+                    return partial(hmethod, obj)
+
                 if method := self._get_previous(self.orig_class, "methods", name, current_code):
                     return partial(method, obj)
 
@@ -117,17 +122,49 @@ class SuperProxy:
         if current_code is None:
             return stack[-1]
         # Walk newest to oldest looking for the caller's code object
+        return SuperProxy._walk_previous(
+            stack, lambda candidate: getattr(_unwrap_callable(candidate), "__code__", None) is current_code
+        )[1]
+
+    @staticmethod
+    def _walk_previous(stack: list[Any], is_caller: Callable[[Any], bool]) -> tuple[Any, Any]:
+        """Walk a stack of stored versions newest to oldest looking for the caller.
+
+        :param stack: The stored versions of a member, oldest first
+        :param is_caller: Predicate telling whether a stored version is the one calling super()
+        :return: A tuple with the caller's version (``None`` if not found) and the version before it
+                 (``None`` if the caller is the oldest one, the newest version if the caller is not found).
+        """
         for idx in range(len(stack) - 1, -1, -1):
             candidate = stack[idx]
-            code = getattr(_unwrap_callable(candidate), "__code__", None)
-            if code is current_code:
+            if is_caller(candidate):
                 # If the caller is already the first entry, there's no prior version
-                if idx == 0:
-                    return None
-                # Return the immediately previous version
-                return stack[idx - 1]
+                return candidate, stack[idx - 1] if idx else None
         # Fallback to newest stored version if caller not found
-        return stack[-1]
+        return None, stack[-1]
+
+    @staticmethod
+    def _get_previous_hybrid_method(orig_class: PatchedClass, name: str, current_code: Any, obj: object) -> Any:
+        """Get the previous instance function or expression of a hybrid method.
+
+        The caller decides which one is returned: the previous ``func`` when super() is called from
+        the instance function, and the previous ``expr`` when it is called from the expression.
+        """
+        stack = orig_class.__unpatched__["hybrid_methods"].get(name, [])
+        if not stack:
+            return None
+
+        def in_func(candidate: Any) -> bool:
+            return getattr(getattr(candidate, "func", None), "__code__", None) is current_code
+
+        def in_expr(candidate: Any) -> bool:
+            return getattr(getattr(candidate, "expr", None), "__code__", None) is current_code
+
+        caller, previous = SuperProxy._walk_previous(stack, lambda candidate: in_func(candidate) or in_expr(candidate))
+        # When func and expr share the same code (no expression defined) the receiver tells them apart.
+        is_expr = isinstance(obj, type) if caller is None or (in_func(caller) and in_expr(caller)) else in_expr(caller)
+        # A stored member that is not a hybrid method falls through
+        return getattr(previous, "expr" if is_expr else "func", None)
 
 
 def get_members(cls: type) -> MappingProxyType[str, Any]:
@@ -157,6 +194,8 @@ def patch_member(orig_class: PatchedClass, member_name: str, member: Any) -> Non
         _patch_propertylike(orig_class, member_name, member, "properties", ("fget", "fset", "fdel"))
     elif isinstance(member, hybrid_property):
         _patch_propertylike(orig_class, member_name, member, "hybrid_properties", ("fget", "fset", "fdel", "expr"))
+    elif isinstance(member, hybrid_method):
+        _patch_hybrid_method(orig_class, member_name, member)
     elif isinstance(member, FunctionType):
         _patch_methodlike(orig_class, member_name, member, "methods")
     elif isinstance(member, classmethod):
@@ -212,6 +251,22 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
         new_prop = hybrid_property(**funcs)
     # Replace the original property-like member
     setattr(orig_class, prop_name, new_prop)
+
+
+def _patch_hybrid_method(orig_class: PatchedClass, method_name: str, method: hybrid_method) -> None:
+    """Patch a hybrid method in a class.
+
+    :param orig_class: The class to patch
+    :param method_name: The name of the hybrid method to patch in the class
+    :param method: The hybrid method object to replace the original member with
+    """
+    # Keep a reference to the original hybrid method
+    _store_unpatched(orig_class, method_name, "hybrid_methods")
+    # Inject super() in both the instance function and the expression
+    func = _inject_super_proxy(method.func, orig_class)
+    # The expression defaults to the instance function when not defined
+    expr = func if method.expr is method.func else _inject_super_proxy(method.expr, orig_class)
+    setattr(orig_class, method_name, hybrid_method(func, expr))
 
 
 def _patch_methodlike(orig_class: PatchedClass, method_name: str, method: methodlike, category: str) -> None:

@@ -4,6 +4,7 @@ Indico defines its database schema using [SQLAlchemy](https://www.sqlalchemy.org
 
 - [Add new columns and relationships](#add-new-columns-and-relationships)
 - [Add and modify hybrid properties](#add-and-modify-hybrid-properties)
+- [Add and modify hybrid methods](#add-and-modify-hybrid-methods)
 - [Add, remove and replace table constraints](#add-remove-and-replace-table-constraints)
 - [Generate Alembic migration scripts for patched models](#generate-alembic-migration-scripts-for-patched-models)
 
@@ -71,6 +72,40 @@ class _Event:
 ```
 
 You will override existing hybrid properties in the original model class by redefining them in the patch class. This also works for hybrid property setters, deleters and expressions. In this example, the `event_message` hybrid property is overridden to always return an empty string.
+
+## Add and modify hybrid methods
+
+```python
+@patch(Event)
+class _Event:
+    # Adds a new hybrid method
+    @hybrid_method
+    def is_in_category(self, category_id):
+        return self.category_id == category_id
+
+    # Adds the expression for the new hybrid method
+    @is_in_category.expression
+    def is_in_category(cls, category_id):
+        return cls.category_id == category_id
+```
+
+Add new hybrid methods to the original model class by defining them in the patch class.
+
+```python
+@patch(Event)
+class _Event:
+    # Overrides an existing hybrid method calling the original instance function
+    @hybrid_method
+    def is_in_category(self, category_id):
+        return super().is_in_category(category_id) and not self.is_deleted
+
+    # Overrides the expression calling the original expression
+    @is_in_category.expression
+    def is_in_category(cls, category_id):
+        return super().is_in_category(category_id) & ~cls.is_deleted
+```
+
+Existing hybrid methods are overridden by redefining them in the patch class. Calling `super().x(args)` in the instance function returns the result of the original instance function, while calling it in the expression returns the result of the original expression. A hybrid method redefined without `.expression` uses its instance function at class level, and `super()` there resolves to the original expression.
 
 ## Add, remove and replace table constraints
 

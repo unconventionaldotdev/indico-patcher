@@ -10,6 +10,7 @@ from sqlalchemy import Column
 from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
 from sqlalchemy import String
+from sqlalchemy.ext.hybrid import hybrid_method
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
@@ -53,6 +54,14 @@ def Fool(db_base):
         @hybrid_property
         def hprop(self):
             return "hprop"
+
+        @hybrid_method
+        def hmeth(self, n):
+            return self.id + n
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return cls.id + n
 
         @staticmethod
         def smeth(*args, **kwargs):
@@ -551,6 +560,231 @@ def test_patch_class_for_hybrid_property_with_super(Fool):
 
     fool = Fool()
     assert fool.hprop == "hprophprop"
+
+
+# -- hybrid methods ------------------------------------------------------------
+
+def test_patch_class_for_hybrid_method(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @hybrid_method
+        def nhmeth(self, n):
+            return self.id * n
+
+        @nhmeth.expression
+        def nhmeth(cls, n):
+            return cls.id * n
+
+    assert Fool(id=3).nhmeth(2) == 6
+    assert isinstance(Fool.nhmeth(2), ClauseElement)
+    assert str(Fool.nhmeth(2)) == str(Fool.id * 2)
+
+
+def test_patch_class_for_hybrid_method_override(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @hybrid_method
+        def hmeth(self, n):
+            return -n
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return cls.id - n
+
+    assert Fool(id=3).hmeth(2) == -2
+    assert str(Fool.hmeth(2)) == str(Fool.id - 2)
+
+
+def test_patch_class_for_hybrid_method_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) * 10
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) * 10
+
+    assert Fool(id=3).hmeth(2) == 50
+    assert str(Fool.hmeth(2)) == str((Fool.id + 2) * 10)
+
+
+def test_patch_class_for_hybrid_method_with_super_without_expression(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) * 10
+
+    assert Fool(id=3).hmeth(2) == 50
+    # At class level the instance function is used and super() resolves to the original expression
+    assert str(Fool.hmeth(2)) == str((Fool.id + 2) * 10)
+
+
+def test_patch_class_for_hybrid_method_with_super_stacked(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) * 10
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) * 10
+
+    @patch_class(Fool)
+    class _Fool2:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) + 1
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) + 1
+
+    assert Fool(id=3).hmeth(2) == 51
+    assert str(Fool.hmeth(2)) == str(((Fool.id + 2) * 10) + 1)
+
+
+def test_patch_class_for_hybrid_method_with_super_stack_of_three(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) * 10
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) * 10
+
+    @patch_class(Fool)
+    class _Fool2:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) + 1
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) + 1
+
+    @patch_class(Fool)
+    class _Fool3:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) - 3
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) - 3
+
+    assert Fool(id=3).hmeth(2) == ((5 * 10) + 1) - 3
+    assert str(Fool.hmeth(2)) == str((((Fool.id + 2) * 10) + 1) - 3)
+
+
+def test_patch_class_for_hybrid_method_override_without_super_then_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        @hybrid_method
+        def hmeth(self, n):
+            return -n
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return cls.id - n
+
+    @patch_class(Fool)
+    class _Fool2:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) * 10
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) * 10
+
+    assert Fool(id=3).hmeth(2) == -20
+    assert str(Fool.hmeth(2)) == str((Fool.id - 2) * 10)
+
+
+def test_patch_class_for_hybrid_method_shared_then_split(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) * 10
+
+    @patch_class(Fool)
+    class _Fool2:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) + 1
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) + 1
+
+    assert Fool(id=3).hmeth(2) == 51
+    assert str(Fool.hmeth(2)) == str(((Fool.id + 2) * 10) + 1)
+
+
+def test_patch_class_for_hybrid_method_split_then_shared(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) + 1
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super().hmeth(n) + 1
+
+    @patch_class(Fool)
+    class _Fool2:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) * 10
+
+    assert Fool(id=3).hmeth(2) == 60
+    assert str(Fool.hmeth(2)) == str(((Fool.id + 2) + 1) * 10)
+
+
+def test_patch_class_for_hybrid_method_with_super_in_subclass(Fool):
+    class Magician(Fool):
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) + 100
+
+    assert Magician(id=3).hmeth(2) == 105
+
+    @patch_class(Fool)
+    class _Fool:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) * 10
+
+    assert Fool(id=3).hmeth(2) == 50
+    assert Magician(id=3).hmeth(2) == 150
+
+    @patch_class(Magician)
+    class _Magician:
+        @hybrid_method
+        def hmeth(self, n):
+            return super().hmeth(n) + 1000
+
+    assert Fool(id=3).hmeth(2) == 50
+    assert Magician(id=3).hmeth(2) == 1150
+
+
+def test_patch_class_for_hybrid_method_missing_member_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @hybrid_method
+        def nhmeth(self, n):
+            return super().nhmeth(n)
+
+    with pytest.raises(AttributeError):
+        Fool(id=3).nhmeth(2)
 
 
 # -- methods -------------------------------------------------------------------

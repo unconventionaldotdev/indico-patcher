@@ -4,6 +4,7 @@
 from collections.abc import Iterable
 from enum import Enum
 from enum import EnumMeta
+from typing import TypeVar
 from typing import cast
 
 from aenum import extend_enum
@@ -14,8 +15,10 @@ from .types import EnumWrapper
 
 __all__ = ["patch_enum"]
 
+_E = TypeVar("_E", bound=EnumMeta)
+
 # Attributes used to store data for rich properties in RichEnum
-RICH_ENUM_BASE_ATTRS = ("__titles__", "__css_classess__")
+RICH_ENUM_BASE_ATTRS = ("__titles__", "__css_classes__")
 
 
 # TODO: Modify RichIntEnum upstream so that it's possible to programmatically
@@ -31,10 +34,16 @@ def patch_enum(
 
     :param padding: Value padding for patched enum members. Useful to avoid
                     collisions with future members in the original enum.
-    :param extra_args: Additional attributes that should be carried over to the
-                       original enum.
+    :param extra_attrs: Additional attributes that should be carried over to the
+                        original enum.
     :param rich_attrs: Additional attributes used for per-member rich information
                        in subclasses of RichIntEnum.
+
+    ``__titles__`` and ``__css_classes__`` are merged (with padding) for any
+    enum that defines them, not only for subclasses of RichIntEnum. If the
+    patch defines one of them but the original enum does not, it is ignored.
+
+    The decorator returns the patch enum.
     """
     if not isinstance(enum, EnumMeta):
         raise TypeError("The 'enum' argument must be a subclass of Enum.")
@@ -45,14 +54,15 @@ def patch_enum(
     _rich_attrs: set[str] = set()
     if rich_attrs and not issubclass(enum, RichIntEnum):
         raise ValueError("The argument 'rich_attrs' can only be used for subclasses of RichIntEnum.")
+    _rich_attrs.update(attr for attr in RICH_ENUM_BASE_ATTRS if hasattr(enum, attr))
     if issubclass(enum, RichIntEnum):
         _rich_attrs.update(RICH_ENUM_BASE_ATTRS + rich_attrs)
 
     # Make sure that extra attributes don't override rich attributes in the original enum
     if collision := _rich_attrs.intersection(set(extra_attrs)):
-        raise ValueError(f"The original Emum already defines a '{list(collision)[0]}' attribute for rich information.")
+        raise ValueError(f"The original Enum already defines a '{list(collision)[0]}' attribute for rich information.")
 
-    def wrapper(patch: EnumMeta) -> None:
+    def wrapper(patch: _E) -> _E:
         if not isinstance(patch, EnumMeta):
             raise TypeError("The patch must be a subclass of Enum.")
         # Extend original enum with members from patch
@@ -65,9 +75,10 @@ def patch_enum(
         for attr in extra_attrs:
             value = getattr(patch, attr)
             setattr(enum, attr, value)
+        return patch
 
     def _patch_rich_attr(patch: EnumMeta, attr: str) -> None:
-        """Patch the rich attribute af a RichIntEnum."""
+        """Patch a per-member rich attribute of the original enum."""
         if not all(hasattr(x, attr) for x in (enum, patch)):
             return
         orig_rich_values = getattr(enum, attr)

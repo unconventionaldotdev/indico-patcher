@@ -2,6 +2,7 @@
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
 from collections import defaultdict
+from functools import wraps
 from unittest.mock import MagicMock
 from unittest.mock import call
 
@@ -812,6 +813,151 @@ def test_patch_class_for_staticmethod_with_super_in_subclass(Fool):
     Magician.__probe__.reset_mock()
     Magician.smeth("Caller")
     assert Magician.__probe__.call_args_list == [call("Caller"), call("_Magician"), call("Magician"), call("_Fool")]
+
+
+# -- decorators ----------------------------------------------------------------
+
+def decorator(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def test_patch_class_for_decorated_method_with_super(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @decorator
+        def meth(self, arg):
+            super().meth(arg)
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc")
+
+
+def test_patch_class_for_decorated_method_with_super_multiple_times(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        @decorator
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("_Fool1")
+
+    @patch_class(Fool)
+    class _Fool2:
+        @decorator
+        def meth(self, arg):
+            self.__probe__(arg)
+            super().meth("_Fool2")
+
+    Fool().meth("Caller")
+    assert Fool.__probe__.call_args_list == [call("Caller"), call("_Fool2"), call("_Fool1")]
+
+
+def test_patch_class_for_decorated_method_with_super_referencing_wrapper(Fool):
+    def counter(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            wrapper.calls += 1
+            return func(*args, **kwargs)
+
+        wrapper.calls = 0
+        return wrapper
+
+    @patch_class(Fool)
+    class _Fool:
+        @counter
+        def meth(self, arg):
+            super().meth(arg)
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc")
+    assert Fool.meth.calls == 1
+
+
+def test_patch_class_for_decorated_method_with_super_calling_other_class(Fool):
+    class Base:
+        def hook(self):
+            return "Base"
+
+    class Other(Base):
+        def hook(self):
+            return f"Other>{super().hook()}"
+
+    hook = Other.hook
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            func(self, *args, **kwargs)
+            return hook(Other())
+
+        return wrapper
+
+    @patch_class(Fool)
+    class _Fool:
+        @decorator
+        def meth(self, arg):
+            super().meth(arg)
+
+    assert Fool().meth("abc") == "Other>Base"
+    Fool.__probe__.assert_called_once_with("abc")
+
+
+def test_patch_class_for_decorated_method_with_empty_closure_cell(Fool):
+    def lazy(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if kwargs.get("late"):
+                return late
+            return func(*args, **kwargs)
+
+        if False:
+            late = None
+        return wrapper
+
+    @patch_class(Fool)
+    class _Fool:
+        @lazy
+        def meth(self, arg):
+            super().meth(arg)
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc")
+
+
+# Module-level so that `global` in the test below writes to the real module globals
+counter = 0
+
+
+def test_patch_class_for_decorated_method_keeps_globals_of_closure_functions(Fool):
+    def count(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            global counter
+            counter += 1
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    def passthrough(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    @patch_class(Fool)
+    class _Fool:
+        @passthrough
+        @count
+        def meth(self, arg):
+            super().meth(arg)
+
+    before = counter
+    Fool().meth("abc")
+    assert counter == before + 1
 
 
 # -- SQLAlchemy ----------------------------------------------------------------

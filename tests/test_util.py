@@ -2,6 +2,7 @@
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
 from collections import defaultdict
+from functools import wraps
 from unittest import mock
 
 import pytest
@@ -10,7 +11,10 @@ from sqlalchemy.sql.elements import ClauseElement
 
 from indico_patcher.util import SUPER_ENABLED_DESCRIPTORS
 from indico_patcher.util import SuperProxy
+from indico_patcher.util import _calls_patch_super
 from indico_patcher.util import _copy_function
+from indico_patcher.util import _get_cell_contents
+from indico_patcher.util import _get_codes
 from indico_patcher.util import _inject_super_proxy
 from indico_patcher.util import _patch_attr
 from indico_patcher.util import _patch_methodlike
@@ -23,6 +27,7 @@ from indico_patcher.util import patch_member
 @pytest.fixture
 def Fool():
     class Fool:
+        __patches__ = []
         __unpatched__ = defaultdict(lambda: defaultdict(list))
         attr = None
 
@@ -330,6 +335,116 @@ def test_inject_super_proxy(Fool):
     assert new_func.__name__ == _Fool.meth.__name__
     assert new_func.__defaults__ == _Fool.meth.__defaults__
     assert new_func.__closure__ == _Fool.meth.__closure__
+
+
+def test_inject_super_proxy_for_decorated_function(Fool):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    class _Fool:
+        @decorator
+        def meth(self):
+            super().meth()
+
+    Fool.__patches__.append(_Fool)
+    orig_func = _Fool.meth.__wrapped__
+    new_func = _inject_super_proxy(_Fool.meth, Fool)
+    new_wrapped = new_func.__closure__[0].cell_contents
+    assert new_wrapped is not orig_func
+    assert isinstance(new_wrapped.__globals__["super"], SuperProxy)
+    assert "super" not in orig_func.__globals__
+    assert new_wrapped.__code__ == orig_func.__code__
+
+
+def test_inject_super_proxy_keeps_function_attributes(Fool):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    class _Fool:
+        @decorator
+        def meth(self, *, x=1):
+            super().meth()
+
+    Fool.__patches__.append(_Fool)
+    _Fool.meth.custom = "value"
+    new_func = _inject_super_proxy(_Fool.meth, Fool)
+    new_wrapped = next(cell.cell_contents for cell in new_func.__closure__ if callable(cell.cell_contents))
+    assert new_wrapped is not _Fool.meth.__wrapped__
+    assert new_wrapped.__kwdefaults__ == {"x": 1}
+    assert new_wrapped.__qualname__ == _Fool.meth.__wrapped__.__qualname__
+    assert new_func.__qualname__ == _Fool.meth.__qualname__
+    assert new_func.custom == "value"
+
+
+# -- closures ------------------------------------------------------------------
+
+def test_get_codes():
+    def inner():
+        pass
+
+    def outer():
+        inner()
+
+    assert _get_codes(outer) == {outer.__code__, inner.__code__}
+
+
+def test_get_codes_for_non_function():
+    assert _get_codes(None) == set()
+    assert _get_codes(object()) == set()
+
+
+def test_get_codes_for_self_referencing_function():
+    def func():
+        return func
+
+    assert _get_codes(func) == {func.__code__}
+
+
+def test_get_cell_contents():
+    value = object()
+
+    def func():
+        return value
+
+    assert _get_cell_contents(func.__closure__[0]) is value
+
+
+def test_get_cell_contents_for_empty_cell():
+    def func():
+        return late
+
+    if False:
+        late = None
+
+    assert _get_cell_contents(func.__closure__[0]) is None
+
+
+def test_calls_patch_super():
+    class _Fool:
+        def meth(self):
+            super().meth()
+
+        def other(self):
+            pass
+
+    assert _calls_patch_super(_Fool.meth, {_Fool})
+    assert not _calls_patch_super(_Fool.meth, set())
+    assert not _calls_patch_super(_Fool.other, {_Fool})
+
+
+def test_calls_patch_super_for_function_without_closure():
+    def func():
+        pass
+
+    assert not _calls_patch_super(func, {object})
 
 
 def test_copy_function():

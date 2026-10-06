@@ -12,6 +12,7 @@ from typing import Any
 from typing import cast
 
 from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import declared_attr
 
 from indico.util.decorators import classproperty
 
@@ -151,7 +152,10 @@ def patch_member(orig_class: PatchedClass, member_name: str, member: Any) -> Non
     """
     # TODO: Patch relationship
     # TODO: Patch deferred columns
-    if isinstance(member, classproperty):
+    # XXX: Must be checked before property since declared_attr subclasses it
+    if isinstance(member, declared_attr):
+        _patch_attr(orig_class, member_name, member.fget(orig_class))  # type: ignore[misc]
+    elif isinstance(member, classproperty):
         _patch_propertylike(orig_class, member_name, member, "classproperties", ("fget", "fset", "fdel"))
     elif isinstance(member, property):
         _patch_propertylike(orig_class, member_name, member, "properties", ("fget", "fset", "fdel"))

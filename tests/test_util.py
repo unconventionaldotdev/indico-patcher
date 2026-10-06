@@ -6,6 +6,7 @@ from functools import wraps
 from unittest import mock
 
 import pytest
+from sqlalchemy.ext.hybrid import hybrid_method
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.elements import ClauseElement
@@ -18,6 +19,7 @@ from indico_patcher.util import _get_cell_contents
 from indico_patcher.util import _get_codes
 from indico_patcher.util import _inject_super_proxy
 from indico_patcher.util import _patch_attr
+from indico_patcher.util import _patch_hybrid_method
 from indico_patcher.util import _patch_methodlike
 from indico_patcher.util import _patch_propertylike
 from indico_patcher.util import _reaches_patch_super
@@ -50,6 +52,10 @@ def Fool():
             pass
 
         def meth(self):
+            pass
+
+        @hybrid_method
+        def hmeth(self):
             pass
 
     return Fool
@@ -96,6 +102,14 @@ def _Fool():
 
         def meth(self):
             pass
+
+        @hybrid_method
+        def hmeth(self):
+            pass
+
+        @hmeth.expression
+        def hmeth(cls):
+            return ClauseElement()
 
     return _Fool
 
@@ -190,6 +204,13 @@ def test_patch_member_for_methodlike(_patch_methodlike, Fool):
     cmeth = Fool.__dict__["cmeth"]
     patch_member(Fool, "cmeth", cmeth)
     _patch_methodlike.assert_called_with(Fool, "cmeth", cmeth, "classmethods")
+
+
+@mock.patch("indico_patcher.util._patch_hybrid_method")
+def test_patch_member_for_hybrid_method(_patch_hybrid_method, Fool):
+    hmeth = Fool.__dict__["hmeth"]
+    patch_member(Fool, "hmeth", hmeth)
+    _patch_hybrid_method.assert_called_with(Fool, "hmeth", hmeth)
 
 
 # -- attribute -----------------------------------------------------------------
@@ -297,6 +318,20 @@ def test_patch_methodlike_for_staticmethod(_inject_super_proxy, _store_unpatched
     assert Fool.smeth == mock_func
 
 
+@mock.patch("indico_patcher.util._store_unpatched")
+@mock.patch("indico_patcher.util._inject_super_proxy")
+def test_patch_hybrid_method(_inject_super_proxy, _store_unpatched, Fool, _Fool):
+    mock_func = mock.Mock()
+    _inject_super_proxy.return_value = mock_func
+    hmeth = _Fool.__dict__["hmeth"]
+    _patch_hybrid_method(Fool, "hmeth", hmeth)
+    new_hmeth = Fool.__dict__["hmeth"]
+    _store_unpatched.assert_called_with(Fool, "hmeth", "hybrid_methods")
+    _inject_super_proxy.assert_has_calls([mock.call(hmeth.func, Fool), mock.call(hmeth.expr, Fool)])
+    assert new_hmeth.func == mock_func
+    assert new_hmeth.expr == mock_func
+
+
 # -- store unpatched member ----------------------------------------------------
 
 @pytest.mark.parametrize(("member_name", "category"), [
@@ -306,6 +341,7 @@ def test_patch_methodlike_for_staticmethod(_inject_super_proxy, _store_unpatched
     ("meth", "methods"),
     ("cmeth", "classmethods"),
     ("smeth", "staticmethods"),
+    ("hmeth", "hybrid_methods"),
 ])
 def test_store_unpatched_member(member_name, category, Fool):
     _store_unpatched(Fool, member_name, category)
@@ -319,6 +355,7 @@ def test_store_unpatched_member(member_name, category, Fool):
     ("meth", "methods"),
     ("cmeth", "classmethods"),
     ("smeth", "staticmethods"),
+    ("hmeth", "hybrid_methods"),
 ])
 def test_store_unpatched_member_from_parent(member_name, category, Fool):
     class Magician(Fool):

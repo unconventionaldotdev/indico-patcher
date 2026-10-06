@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import Any
 from typing import cast
 
+from sqlalchemy.ext.hybrid import hybrid_method
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import declared_attr
 
@@ -67,6 +68,10 @@ class SuperProxy:
                 # XXX: We currently default to `fget`.
                 if hprop := self._get_previous(self.orig_class, "hybrid_properties", name, current_code):
                     return hprop.fget(obj)
+
+                if hmethod := self._get_previous(self.orig_class, "hybrid_methods", name, current_code):
+                    # Calls on the class go through the expression
+                    return partial(hmethod.expr if isinstance(obj, type) else hmethod.func, obj)
 
                 if method := self._get_previous(self.orig_class, "methods", name, current_code):
                     return partial(method, obj)
@@ -123,7 +128,11 @@ class SuperProxy:
         for idx in range(len(stack) - 1, -1, -1):
             candidate = stack[idx]
             # The caller can be a function wrapped by a decorator
-            if current_code in _get_codes(_unwrap_callable(candidate)):
+            codes = _get_codes(_unwrap_callable(candidate))
+            # Hybrid methods can be called from either the function or the expression
+            if isinstance(candidate, hybrid_method):
+                codes |= _get_codes(candidate.expr)
+            if current_code in codes:
                 # If the caller is already the first entry, there's no prior version
                 if idx == 0:
                     return None
@@ -169,6 +178,8 @@ def patch_member(orig_class: PatchedClass, member_name: str, member: Any) -> Non
         _patch_methodlike(orig_class, member_name, member, "classmethods")
     elif isinstance(member, staticmethod):
         _patch_methodlike(orig_class, member_name, member, "staticmethods")
+    elif isinstance(member, hybrid_method):
+        _patch_hybrid_method(orig_class, member_name, member)
     else:
         _patch_attr(orig_class, member_name, member)
 
@@ -240,6 +251,23 @@ def _patch_methodlike(orig_class: PatchedClass, method_name: str, method: method
     new_method = classmethod(new_func) if isinstance(method, classmethod) else new_func
     # Replace the original method
     setattr(orig_class, method_name, new_method)
+
+
+def _patch_hybrid_method(orig_class: PatchedClass, method_name: str, method: hybrid_method) -> None:
+    """Patch a hybrid method in a class.
+
+    :param orig_class: The class to patch
+    :param method_name: The name of the hybrid method to patch in the class
+    :param method: The hybrid method object to replace the original member with
+    """
+    # Keep a reference to the original hybrid method
+    _store_unpatched(orig_class, method_name, "hybrid_methods")
+    # Inject super() in the function and the expression
+    func = _inject_super_proxy(method.func, orig_class)
+    # The expression is the function itself unless defined separately
+    expr = func if method.expr is method.func else _inject_super_proxy(method.expr, orig_class)
+    # Replace the original hybrid method
+    setattr(orig_class, method_name, hybrid_method(func, expr))
 
 
 def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) -> None:
@@ -315,6 +343,8 @@ def _unwrap_callable(member: Any) -> Any:
         return member.__func__
     if isinstance(member, staticmethod):
         return member.__func__
+    if isinstance(member, hybrid_method):
+        return member.func
     return member
 
 

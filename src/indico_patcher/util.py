@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 from functools import partial
 from types import CellType
+from types import CodeType
 from types import FrameType
 from types import FunctionType
 from types import MappingProxyType
@@ -120,8 +121,8 @@ class SuperProxy:
         # Walk newest to oldest looking for the caller's code object
         for idx in range(len(stack) - 1, -1, -1):
             candidate = stack[idx]
-            code = getattr(_unwrap_callable(candidate), "__code__", None)
-            if code is current_code:
+            # The caller can be a function wrapped by a decorator
+            if current_code in _get_codes(_unwrap_callable(candidate)):
                 # If the caller is already the first entry, there's no prior version
                 if idx == 0:
                     return None
@@ -261,9 +262,25 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
     :param func: The function that will get SuperProxy injected
     :param orig_class: The original class that will be passed to SuperProxy
     """
-    globals = func.__globals__.copy()
-    globals["super"] = SuperProxy(orig_class)
-    return _copy_function(func, globals, func.__closure__)
+    super_proxy = SuperProxy(orig_class)
+    patch_classes = {cls for patch_class in orig_class.__patches__ for cls in patch_class.__mro__}
+    copies: dict[FunctionType, FunctionType] = {}
+
+    def copy(fn: FunctionType, inject: bool) -> FunctionType:
+        if fn in copies:
+            return copies[fn]
+        globals = {**fn.__globals__, "super": super_proxy} if inject else fn.__globals__
+        # Decorated functions are called from the closure of their wrappers, so copy the functions there too
+        cells = [CellType() if isinstance(_get_cell_contents(cell), FunctionType) else cell
+                 for cell in fn.__closure__ or ()]
+        # Store the copy before filling its closure since functions can reference themselves
+        copies[fn] = new_func = _copy_function(fn, globals, tuple(cells) or None)
+        for cell, new_cell in zip(fn.__closure__ or (), cells, strict=True):
+            if new_cell is not cell:
+                new_cell.cell_contents = copy(cell.cell_contents, _calls_patch_super(cell.cell_contents, patch_classes))
+        return new_func
+
+    return copy(func, inject=True)
 
 
 def _inject_descriptor_super_proxy(func: Any, orig_class: PatchedClass) -> Any:
@@ -282,6 +299,30 @@ def _unwrap_callable(member: Any) -> Any:
     if isinstance(member, staticmethod):
         return member.__func__
     return member
+
+
+def _get_codes(func: Any, seen: set[FunctionType] | None = None) -> set[CodeType]:
+    """Return the code objects of a function and the functions in its closure."""
+    seen = set() if seen is None else seen
+    if not isinstance(func, FunctionType) or func in seen:
+        return set()
+    seen.add(func)
+    return {func.__code__}.union(*(_get_codes(_get_cell_contents(cell), seen) for cell in func.__closure__ or ()))
+
+
+def _get_cell_contents(cell: CellType) -> Any:
+    """Return the contents of a closure cell or None if the cell is empty."""
+    try:
+        return cell.cell_contents
+    except ValueError:
+        return None
+
+
+def _calls_patch_super(func: FunctionType, patch_classes: set[type]) -> bool:
+    """Check whether a function calls super() from one of the patch classes."""
+    # Functions referencing super in a class body get a __class__ cell with that class
+    cells = dict(zip(func.__code__.co_freevars, func.__closure__ or (), strict=True))
+    return "__class__" in cells and _get_cell_contents(cells["__class__"]) in patch_classes
 
 
 def _copy_function(func: FunctionType, globals: dict[str, Any], closure: tuple[CellType, ...] | None) -> FunctionType:

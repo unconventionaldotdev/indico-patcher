@@ -6,6 +6,7 @@ from enum import Enum
 import pytest
 from pytest import raises
 
+from indico.util.enum import IndicoIntEnum
 from indico.util.enum import RichIntEnum
 
 from indico_patcher.enums import patch_enum
@@ -84,11 +85,17 @@ def test_patch_enum_only_for_enums(TarotCard):
             pass
 
 
-def test_patch_enum_with_rich_attrs(TarotCard):
-    with raises(ValueError):
-        @patch_enum(TarotCard, rich_attrs=("__arcana__",))
-        class _TarotCard(Enum):
-            pass
+def test_patch_enum_without_rich_attrs():
+    class Color(IndicoIntEnum):
+        __titles__ = ["Red"]
+        red = 0
+
+    @patch_enum(Color)
+    class _Color(IndicoIntEnum):
+        __titles__ = ["Blue"]
+        blue = 1
+
+    assert Color.__titles__ == ["Red"]
 
 
 def test_patch_richenum(RichTarotCard):
@@ -141,3 +148,45 @@ def test_patch_enum_with_extra_attrs_collision(RichTarotCard):
         @patch_enum(RichTarotCard, extra_attrs=("__titles__",))
         class _TarotCard(Enum):
             pass
+
+
+def test_patch_enum_returns_patch(TarotCard):
+    @patch_enum(TarotCard)
+    class _TarotCard(Enum):
+        the_empress = 3
+
+    assert _TarotCard.the_empress.value == 3
+
+
+def test_patch_enum_with_titles():
+    class Color(IndicoIntEnum):
+        __titles__ = ["Red", "Green"]
+        red = 0
+        green = 1
+
+        def get_title(self):
+            return self.__titles__[self.value]
+
+    @patch_enum(Color, padding=10, rich_attrs=("__titles__",))
+    class _Color(IndicoIntEnum):
+        __titles__ = ["Blue"]
+        blue = 0
+
+    assert Color.green.get_title() == "Green"
+    assert Color.blue.get_title() == "Blue"
+
+
+def test_patch_richenum_with_css_classes():
+    class Suit(RichIntEnum):
+        __titles__ = ["Cups"]
+        __css_classes__ = ["blue"]
+        cups = 0
+
+    @patch_enum(Suit)
+    class _Suit(RichIntEnum):
+        __titles__ = ["Wands"]
+        __css_classes__ = ["red"]
+        wands = 1
+
+    assert Suit.cups.css_class == "blue"
+    assert Suit.wands.css_class == "red"

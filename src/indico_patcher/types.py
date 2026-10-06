@@ -16,7 +16,7 @@ methodlike: TypeAlias = FunctionType | classmethod | staticmethod  # noqa: UP040
 
 # Decorator wrapper aliases
 ClassWrapper: TypeAlias = Callable[[type], type]  # noqa: UP040
-EnumWrapper: TypeAlias = Callable[[EnumMeta], None]  # noqa: UP040
+EnumWrapper: TypeAlias = Callable[[EnumMeta], EnumMeta]  # noqa: UP040
 PatchWrapper: TypeAlias = ClassWrapper | EnumWrapper  # noqa: UP040
 
 # Annotations for extra attributes in patched classes

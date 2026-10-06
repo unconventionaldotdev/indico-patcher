@@ -13,6 +13,7 @@ from sqlalchemy import Integer
 from sqlalchemy import String
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
+from sqlalchemy.orm import declared_attr
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.attributes import QueryableAttribute
 from sqlalchemy.sql.elements import ClauseElement
@@ -982,7 +983,7 @@ def test_patch_class_for_decorated_method_without_super_keeps_wrapped_function(F
     assert Fool().meth("abc") == "no-super"
 
 
-# -- SQLAlchemy ----------------------------------------------------------------
+# -- SQLAlchemy: columns -------------------------------------------------------
 
 def test_patch_class_for_db_column(Fool, db_base, db_session):
     @patch_class(Fool)
@@ -999,6 +1000,8 @@ def test_patch_class_for_db_column(Fool, db_base, db_session):
     db_session.flush()
     assert fool.name == "fool"
 
+
+# -- SQLAlchemy: relationships -------------------------------------------------
 
 def test_patch_class_for_relationship(Fool, db_base, db_session):
     class Tag(db_base):
@@ -1044,3 +1047,38 @@ def test_patch_class_for_relationship_with_overwriting(Fool, db_session):
     assert fool3.other == fool1
     assert fool1.others == [fool2, fool3]
     assert db_session.query(Fool).filter(Fool.other == fool1).all() == [fool2, fool3]
+
+
+# -- SQLAlchemy: declared attributes -------------------------------------------
+
+def test_patch_class_for_declared_attr(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @declared_attr
+        def name(cls):
+            return Column(String)
+
+    assert "name" in Fool.__table__.c
+
+
+def test_patch_class_for_declared_attr_in_mixin(Fool, db_base):
+    class Joker(db_base):
+        __tablename__ = "jokers"
+        id = Column(Integer, primary_key=True)
+
+    class NameMixin:
+        @declared_attr
+        def name(cls):
+            return Column(String)
+
+    @patch_class(Fool)
+    class _Fool(NameMixin):
+        pass
+
+    @patch_class(Joker)
+    class _Joker(NameMixin):
+        pass
+
+    assert "name" in Fool.__table__.c
+    assert "name" in Joker.__table__.c
+    assert Fool.__table__.c.name is not Joker.__table__.c.name

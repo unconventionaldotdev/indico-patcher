@@ -10,6 +10,7 @@ from sqlalchemy.sql.elements import ClauseElement
 
 from indico_patcher.util import SUPER_ENABLED_DESCRIPTORS
 from indico_patcher.util import SuperProxy
+from indico_patcher.util import _copy_function
 from indico_patcher.util import _inject_super_proxy
 from indico_patcher.util import _patch_attr
 from indico_patcher.util import _patch_methodlike
@@ -329,3 +330,36 @@ def test_inject_super_proxy(Fool):
     assert new_func.__name__ == _Fool.meth.__name__
     assert new_func.__defaults__ == _Fool.meth.__defaults__
     assert new_func.__closure__ == _Fool.meth.__closure__
+
+
+def test_copy_function():
+    def func(a, b=2, *, c=3):
+        """Docstring."""
+
+    func.custom = "value"
+    new_globals = {"foo": "bar"}
+    new_func = _copy_function(func, new_globals, None)
+    assert new_func is not func
+    assert new_func.__code__ == func.__code__
+    assert new_func.__globals__ is new_globals
+    assert new_func.__closure__ is None
+    assert new_func.__name__ == func.__name__
+    assert new_func.__qualname__ == func.__qualname__
+    assert new_func.__module__ == func.__module__
+    assert new_func.__doc__ == func.__doc__
+    assert new_func.__defaults__ == (2,)
+    assert new_func.__kwdefaults__ == {"c": 3}
+    assert new_func.__annotations__ == func.__annotations__
+    assert new_func.__dict__ == {"custom": "value"}
+
+
+def test_copy_function_with_closure():
+    value = 1
+
+    def func():
+        return value
+
+    cell = type(func.__closure__[0])(2)
+    new_func = _copy_function(func, func.__globals__, (cell,))
+    assert new_func() == 2
+    assert func() == 1

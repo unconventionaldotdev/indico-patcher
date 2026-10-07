@@ -6,6 +6,7 @@ from unittest import mock
 
 import pytest
 from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.elements import ClauseElement
 
 from indico_patcher.util import SUPER_ENABLED_DESCRIPTORS
@@ -159,6 +160,16 @@ def test_patch_member_for_propertylike(_patch_propertylike, Fool):
     hprop = Fool.__dict__["hprop"]
     patch_member(Fool, "hprop", hprop)
     _patch_propertylike.assert_called_with(Fool, "hprop", hprop, "hybrid_properties", ("fget", "fset", "fdel", "expr"))
+
+
+@mock.patch("indico_patcher.util._patch_attr")
+def test_patch_member_for_declared_attr(_patch_attr, Fool):
+    @declared_attr
+    def name(cls):
+        return "name"
+
+    patch_member(Fool, "name", name)
+    _patch_attr.assert_called_with(Fool, "name", "name")
 
 
 @mock.patch("indico_patcher.util._patch_methodlike")

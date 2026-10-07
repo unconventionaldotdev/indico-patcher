@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Any
 from typing import cast
 
+from sqlalchemy.ext.hybrid import hybrid_method
 from sqlalchemy.ext.hybrid import hybrid_property
 
 from indico.util.decorators import classproperty
@@ -64,6 +65,10 @@ class SuperProxy:
                 # XXX: We currently default to `fget`.
                 if hprop := self._get_previous(self.orig_class, "hybrid_properties", name, current_code):
                     return hprop.fget(obj)
+
+                if hmethod := self._get_previous(self.orig_class, "hybrid_methods", name, current_code):
+                    # Calls on the class go through the expression
+                    return partial(hmethod.expr if isinstance(obj, type) else hmethod.func, obj)
 
                 if method := self._get_previous(self.orig_class, "methods", name, current_code):
                     return partial(method, obj)
@@ -119,8 +124,11 @@ class SuperProxy:
         # Walk newest to oldest looking for the caller's code object
         for idx in range(len(stack) - 1, -1, -1):
             candidate = stack[idx]
-            code = getattr(_unwrap_callable(candidate), "__code__", None)
-            if code is current_code:
+            funcs = [_unwrap_callable(candidate)]
+            # Hybrid methods can be called from either the function or the expression
+            if isinstance(candidate, hybrid_method):
+                funcs.append(candidate.expr)
+            if any(getattr(func, "__code__", None) is current_code for func in funcs):
                 # If the caller is already the first entry, there's no prior version
                 if idx == 0:
                     return None
@@ -157,6 +165,8 @@ def patch_member(orig_class: PatchedClass, member_name: str, member: Any) -> Non
         _patch_propertylike(orig_class, member_name, member, "properties", ("fget", "fset", "fdel"))
     elif isinstance(member, hybrid_property):
         _patch_propertylike(orig_class, member_name, member, "hybrid_properties", ("fget", "fset", "fdel", "expr"))
+    elif isinstance(member, hybrid_method):
+        _patch_hybrid_method(orig_class, member_name, member)
     elif isinstance(member, FunctionType):
         _patch_methodlike(orig_class, member_name, member, "methods")
     elif isinstance(member, classmethod):
@@ -212,6 +222,23 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
         new_prop = hybrid_property(**funcs)
     # Replace the original property-like member
     setattr(orig_class, prop_name, new_prop)
+
+
+def _patch_hybrid_method(orig_class: PatchedClass, method_name: str, method: hybrid_method) -> None:
+    """Patch a hybrid method in a class.
+
+    :param orig_class: The class to patch
+    :param method_name: The name of the hybrid method to patch in the class
+    :param method: The hybrid method object to replace the original member with
+    """
+    # Keep a reference to the original hybrid method
+    _store_unpatched(orig_class, method_name, "hybrid_methods")
+    # Inject super() in the function and the expression
+    func = _inject_super_proxy(method.func, orig_class)
+    # The expression is the function itself unless defined separately
+    expr = func if method.expr is method.func else _inject_super_proxy(method.expr, orig_class)
+    # Replace the original hybrid method
+    setattr(orig_class, method_name, hybrid_method(func, expr))
 
 
 def _patch_methodlike(orig_class: PatchedClass, method_name: str, method: methodlike, category: str) -> None:
@@ -276,6 +303,8 @@ def _unwrap_callable(member: Any) -> Any:
     """Return the underlying function used for identity comparisons."""
     if isinstance(member, (property, hybrid_property)):
         member = member.fget
+    if isinstance(member, hybrid_method):
+        return member.func
     if isinstance(member, classmethod):
         return member.__func__
     if isinstance(member, staticmethod):

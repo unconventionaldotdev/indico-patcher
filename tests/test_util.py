@@ -5,6 +5,7 @@ from collections import defaultdict
 from unittest import mock
 
 import pytest
+from sqlalchemy.ext.hybrid import hybrid_method
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.sql.elements import ClauseElement
 
@@ -12,6 +13,7 @@ from indico_patcher.util import SUPER_ENABLED_DESCRIPTORS
 from indico_patcher.util import SuperProxy
 from indico_patcher.util import _inject_super_proxy
 from indico_patcher.util import _patch_attr
+from indico_patcher.util import _patch_hybrid_method
 from indico_patcher.util import _patch_methodlike
 from indico_patcher.util import _patch_propertylike
 from indico_patcher.util import _store_unpatched
@@ -31,6 +33,10 @@ def Fool():
 
         @hybrid_property
         def hprop(self):
+            pass
+
+        @hybrid_method
+        def hmeth(self):
             pass
 
         @staticmethod
@@ -76,6 +82,14 @@ def _Fool():
 
         @hprop.expression
         def hprop(cls):
+            return ClauseElement()
+
+        @hybrid_method
+        def hmeth(self):
+            pass
+
+        @hmeth.expression
+        def hmeth(cls):
             return ClauseElement()
 
         @staticmethod
@@ -161,6 +175,13 @@ def test_patch_member_for_propertylike(_patch_propertylike, Fool):
     _patch_propertylike.assert_called_with(Fool, "hprop", hprop, "hybrid_properties", ("fget", "fset", "fdel", "expr"))
 
 
+@mock.patch("indico_patcher.util._patch_hybrid_method")
+def test_patch_member_for_hybrid_method(_patch_hybrid_method, Fool):
+    hmeth = Fool.__dict__["hmeth"]
+    patch_member(Fool, "hmeth", hmeth)
+    _patch_hybrid_method.assert_called_with(Fool, "hmeth", hmeth)
+
+
 @mock.patch("indico_patcher.util._patch_methodlike")
 def test_patch_member_for_methodlike(_patch_methodlike, Fool):
     meth = Fool.__dict__["meth"]
@@ -235,6 +256,20 @@ def test_patch_propertylike_for_hybrid_property(_inject_super_proxy, _store_unpa
     _inject_super_proxy.assert_has_calls(expected_calls)
 
 
+@mock.patch("indico_patcher.util._store_unpatched")
+@mock.patch("indico_patcher.util._inject_super_proxy")
+def test_patch_hybrid_method(_inject_super_proxy, _store_unpatched, Fool, _Fool):
+    mock_func = mock.Mock()
+    _inject_super_proxy.return_value = mock_func
+    hmeth = _Fool.__dict__["hmeth"]
+    _patch_hybrid_method(Fool, "hmeth", hmeth)
+    new_hmeth = Fool.__dict__["hmeth"]
+    _store_unpatched.assert_called_with(Fool, "hmeth", "hybrid_methods")
+    _inject_super_proxy.assert_has_calls([mock.call(hmeth.func, Fool), mock.call(hmeth.expr, Fool)])
+    assert new_hmeth.func == mock_func
+    assert new_hmeth.expr == mock_func
+
+
 # -- method-like ---------------------------------------------------------------
 
 def test_patch_methodlike_for_invalid_values(Fool):
@@ -285,6 +320,7 @@ def test_patch_methodlike_for_staticmethod(_inject_super_proxy, _store_unpatched
     ("attr", "attributes"),
     ("prop", "properties"),
     ("hprop", "hybrid_properties"),
+    ("hmeth", "hybrid_methods"),
     ("meth", "methods"),
     ("cmeth", "classmethods"),
     ("smeth", "staticmethods"),
@@ -298,6 +334,7 @@ def test_store_unpatched_member(member_name, category, Fool):
     ("attr", "attributes"),
     ("prop", "properties"),
     ("hprop", "hybrid_properties"),
+    ("hmeth", "hybrid_methods"),
     ("meth", "methods"),
     ("cmeth", "classmethods"),
     ("smeth", "staticmethods"),

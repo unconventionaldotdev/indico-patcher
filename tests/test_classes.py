@@ -960,6 +960,28 @@ def test_patch_class_for_decorated_method_keeps_globals_of_closure_functions(Foo
     assert counter == before + 1
 
 
+def test_patch_class_for_decorated_method_without_super_keeps_wrapped_function(Fool):
+    registry = {}
+
+    def register(func):
+        registry[func] = 1
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            assert func in registry
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    @patch_class(Fool)
+    class _Fool:
+        @register
+        def meth(self, arg):
+            return "no-super"
+
+    assert Fool().meth("abc") == "no-super"
+
+
 # -- SQLAlchemy ----------------------------------------------------------------
 
 def test_patch_class_for_db_column(Fool, db_base, db_session):

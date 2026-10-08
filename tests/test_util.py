@@ -19,6 +19,7 @@ from indico_patcher.util import _inject_super_proxy
 from indico_patcher.util import _patch_attr
 from indico_patcher.util import _patch_methodlike
 from indico_patcher.util import _patch_propertylike
+from indico_patcher.util import _reaches_patch_super
 from indico_patcher.util import _store_unpatched
 from indico_patcher.util import get_members
 from indico_patcher.util import patch_member
@@ -360,6 +361,31 @@ def test_inject_super_proxy_for_decorated_function(Fool):
     assert new_wrapped.__code__ == orig_func.__code__
 
 
+def test_inject_super_proxy_keeps_unrelated_closure_functions(Fool):
+    def other():
+        pass
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            other()
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    class _Fool:
+        @decorator
+        def meth(self):
+            super().meth()
+
+    Fool.__patches__.append(_Fool)
+    new_func = _inject_super_proxy(_Fool.meth, Fool)
+    cells = dict(zip(new_func.__code__.co_freevars, new_func.__closure__, strict=True))
+    orig_cells = dict(zip(_Fool.meth.__code__.co_freevars, _Fool.meth.__closure__, strict=True))
+    assert cells["other"] is orig_cells["other"]
+    assert cells["func"].cell_contents is not _Fool.meth.__wrapped__
+
+
 def test_inject_super_proxy_keeps_function_attributes(Fool):
     def decorator(func):
         @wraps(func)
@@ -378,6 +404,7 @@ def test_inject_super_proxy_keeps_function_attributes(Fool):
     new_func = _inject_super_proxy(_Fool.meth, Fool)
     new_wrapped = next(cell.cell_contents for cell in new_func.__closure__ if callable(cell.cell_contents))
     assert new_wrapped is not _Fool.meth.__wrapped__
+    assert new_func.__wrapped__ is new_wrapped
     assert new_wrapped.__kwdefaults__ == {"x": 1}
     assert new_wrapped.__qualname__ == _Fool.meth.__wrapped__.__qualname__
     assert new_func.__qualname__ == _Fool.meth.__qualname__
@@ -445,6 +472,43 @@ def test_calls_patch_super_for_function_without_closure():
         pass
 
     assert not _calls_patch_super(func, {object})
+
+
+def test_reaches_patch_super():
+    class _Fool:
+        def meth(self):
+            super().meth()
+
+    def middle():
+        return _Fool.meth
+
+    def outer():
+        return middle
+
+    meth = _Fool.meth
+
+    def holder():
+        return meth
+
+    def deep_middle():
+        return holder
+
+    def deep_outer():
+        return deep_middle
+
+    assert _reaches_patch_super(_Fool.meth, {_Fool})
+    assert _reaches_patch_super(holder, {_Fool})
+    assert _reaches_patch_super(deep_outer, {_Fool})
+    assert not _reaches_patch_super(holder, set())
+    assert not _reaches_patch_super(outer, {_Fool})
+    assert not _reaches_patch_super(None, {_Fool})
+
+
+def test_reaches_patch_super_for_self_referencing_function():
+    def func():
+        return func
+
+    assert not _reaches_patch_super(func, {object})
 
 
 def test_copy_function():

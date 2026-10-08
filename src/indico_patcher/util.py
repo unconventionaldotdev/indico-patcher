@@ -259,6 +259,13 @@ def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) 
 def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> FunctionType:
     """Return a new function from which super() will call SuperProxy().
 
+    Decorated functions are called from the closure of their wrappers, so the functions
+    in the closure that (directly or through their own closures) call super() from a patch
+    class are copied too. Other closure functions are kept as they are, since decorators
+    may rely on their identity.
+    This means that a decorator that keeps the identity of a function on the path to super()
+    (e.g. an outer decorator registering the inner wrapper) will see a different object.
+
     :param func: The function that will get SuperProxy injected
     :param orig_class: The original class that will be passed to SuperProxy
     """
@@ -266,21 +273,27 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
     patch_classes = {cls for patch_class in orig_class.__patches__ for cls in patch_class.__mro__}
     copies: dict[FunctionType, FunctionType] = {}
 
-    def copy(fn: FunctionType, inject: bool) -> FunctionType:
+    def copy_with_closure(fn: FunctionType, inject_proxy: bool) -> FunctionType:
         if fn in copies:
             return copies[fn]
-        globals = {**fn.__globals__, "super": super_proxy} if inject else fn.__globals__
-        # Decorated functions are called from the closure of their wrappers, so copy the functions there too
-        cells = [CellType() if isinstance(_get_cell_contents(cell), FunctionType) else cell
-                 for cell in fn.__closure__ or ()]
+        globals = {**fn.__globals__, "super": super_proxy} if inject_proxy else fn.__globals__
+        closure = fn.__closure__ or ()
+        cells = [CellType() if _reaches_patch_super(_get_cell_contents(cell), patch_classes) else cell
+                 for cell in closure]
         # Store the copy before filling its closure since functions can reference themselves
         copies[fn] = new_func = _copy_function(fn, globals, tuple(cells) or None)
-        for cell, new_cell in zip(fn.__closure__ or (), cells, strict=True):
+        for cell, new_cell in zip(closure, cells, strict=True):
             if new_cell is not cell:
-                new_cell.cell_contents = copy(cell.cell_contents, _calls_patch_super(cell.cell_contents, patch_classes))
+                new_cell.cell_contents = copy_with_closure(
+                    cell.cell_contents, _calls_patch_super(cell.cell_contents, patch_classes)
+                )
+        # Keep __wrapped__ pointing at the copy of the wrapped function, when it was copied
+        wrapped = fn.__dict__.get("__wrapped__")
+        if isinstance(wrapped, FunctionType) and wrapped in copies:
+            new_func.__wrapped__ = copies[wrapped]  # type: ignore[attr-defined]
         return new_func
 
-    return copy(func, inject=True)
+    return copy_with_closure(func, inject_proxy=True)
 
 
 def _inject_descriptor_super_proxy(func: Any, orig_class: PatchedClass) -> Any:
@@ -316,6 +329,17 @@ def _get_cell_contents(cell: CellType) -> Any:
         return cell.cell_contents
     except ValueError:
         return None
+
+
+def _reaches_patch_super(func: Any, patch_classes: set[type], seen: set[FunctionType] | None = None) -> bool:
+    """Check whether a function, or a function in its closure, calls super() from one of the patch classes."""
+    seen = set() if seen is None else seen
+    if not isinstance(func, FunctionType) or func in seen:
+        return False
+    seen.add(func)
+    return _calls_patch_super(func, patch_classes) or any(
+        _reaches_patch_super(_get_cell_contents(cell), patch_classes, seen) for cell in func.__closure__ or ()
+    )
 
 
 def _calls_patch_super(func: FunctionType, patch_classes: set[type]) -> bool:

@@ -90,3 +90,19 @@ jobs:
           ${{ github.ref_name }}
         env:
           GH_TOKEN: ${{ github.token }}
+
+  cleanup:
+    needs: [release, publish]
+    if: (failure() || cancelled()) && needs.release.result == 'success' && needs.publish.result != 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Delete draft release
+        run: >-
+          gh release delete
+          --yes
+          --repo ${{ github.repository }}
+          ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}

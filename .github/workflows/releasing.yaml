@@ -78,6 +78,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           attestations: false
           packages-dir: wheel/
+          skip-existing: true
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@v1.14.2
         with:

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.0
+
+- Added support for patching `declared_attr` members in models.
+- Added support for patching hybrid methods.
+- Allowed `rich_attrs` on any enum, not only `RichIntEnum` subclasses.
+- Returned the patch enum from the decorator when patching enums.
+- Fixed merging of CSS classes in rich enums.
+- Fixed `super()` in patched methods wrapped by other decorators.
+- Kept keyword-only defaults and other function attributes in patched functions.
+- Deleted the draft GitHub release when publishing to PyPI fails.
+
 ## v0.4.2
 
 - Updated the PyPI publish GitHub Action to v1.14.2 (Twine 7) to support wheel metadata version 2.5.

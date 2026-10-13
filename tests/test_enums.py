@@ -31,6 +31,7 @@ def RichTarotCard():
     class RichTarotCard(RichIntEnum):
         __deck__ = "Rider-Waite Tarot"
         __titles__ = ["The Fool", "The Magician", "The High Priestess"]
+        __css_classes__ = ["fool", "magician", "high-priestess"]
         __arcana__ = [Arcana.major, Arcana.major, Arcana.major]
         the_fool = 0
         the_magician = 1
@@ -95,6 +96,7 @@ def test_patch_richenum(RichTarotCard):
     @patch_enum(RichTarotCard, rich_attrs=("__arcana__",))
     class _TarotCard(Enum):
         __titles__ = ["The Empress", "The Emperor"]
+        __css_classes__ = ["empress", "emperor"]
         __arcana__ = [Arcana.major, Arcana.major]
         the_empress = 3
         the_emperor = 4
@@ -102,7 +104,9 @@ def test_patch_richenum(RichTarotCard):
     assert RichTarotCard.the_fool.title == "The Fool"
     assert RichTarotCard.the_magician.title == "The Magician"
     assert RichTarotCard.the_high_priestess.title == "The High Priestess"
+    assert RichTarotCard.the_fool.css_class == "fool"
     assert RichTarotCard.the_empress.title == "The Empress"
+    assert RichTarotCard.the_empress.css_class == "empress"
     assert RichTarotCard.the_empress.arcana == Arcana.major
     assert RichTarotCard.the_emperor.title == "The Emperor"
     assert RichTarotCard.the_emperor.arcana == Arcana.major

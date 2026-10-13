@@ -15,7 +15,7 @@ from .types import EnumWrapper
 __all__ = ["patch_enum"]
 
 # Attributes used to store data for rich properties in RichEnum
-RICH_ENUM_BASE_ATTRS = ("__titles__", "__css_classess__")
+RICH_ENUM_BASE_ATTRS = ("__titles__", "__css_classes__")
 
 
 # TODO: Modify RichIntEnum upstream so that it's possible to programmatically

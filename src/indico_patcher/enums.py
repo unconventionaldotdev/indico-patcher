@@ -52,7 +52,7 @@ def patch_enum(
     if collision := _rich_attrs.intersection(set(extra_attrs)):
         raise ValueError(f"The original Emum already defines a '{list(collision)[0]}' attribute for rich information.")
 
-    def wrapper(patch: EnumMeta) -> None:
+    def wrapper(patch: EnumMeta) -> EnumMeta:
         if not isinstance(patch, EnumMeta):
             raise TypeError("The patch must be a subclass of Enum.")
         # Extend original enum with members from patch
@@ -65,6 +65,7 @@ def patch_enum(
         for attr in extra_attrs:
             value = getattr(patch, attr)
             setattr(enum, attr, value)
+        return patch
 
     def _patch_rich_attr(patch: EnumMeta, attr: str) -> None:
         """Patch the rich attribute af a RichIntEnum."""

@@ -31,10 +31,11 @@ def patch_enum(
 
     :param padding: Value padding for patched enum members. Useful to avoid
                     collisions with future members in the original enum.
-    :param extra_args: Additional attributes that should be carried over to the
-                       original enum.
-    :param rich_attrs: Additional attributes used for per-member rich information
-                       in subclasses of RichIntEnum.
+    :param extra_attrs: Attributes whose value in the patch replaces the one in
+                        the original enum.
+    :param rich_attrs: Attributes holding per-member values in a list, merged
+                       into the original enum's. Subclasses of RichIntEnum always
+                       merge `__titles__` and `__css_classes__`.
     """
     if not isinstance(enum, EnumMeta):
         raise TypeError("The 'enum' argument must be a subclass of Enum.")
@@ -42,11 +43,9 @@ def patch_enum(
         raise ValueError("Padding value cannot be negative.")
 
     # Determine which rich attributes need to be patched
-    _rich_attrs: set[str] = set()
-    if rich_attrs and not issubclass(enum, RichIntEnum):
-        raise ValueError("The argument 'rich_attrs' can only be used for subclasses of RichIntEnum.")
+    _rich_attrs: set[str] = set(rich_attrs)
     if issubclass(enum, RichIntEnum):
-        _rich_attrs.update(RICH_ENUM_BASE_ATTRS + rich_attrs)
+        _rich_attrs.update(RICH_ENUM_BASE_ATTRS)
 
     # Make sure that extra attributes don't override rich attributes in the original enum
     if collision := _rich_attrs.intersection(set(extra_attrs)):
@@ -68,7 +67,7 @@ def patch_enum(
         return patch
 
     def _patch_rich_attr(patch: EnumMeta, attr: str) -> None:
-        """Patch the rich attribute af a RichIntEnum."""
+        """Merge the per-member values of a rich attribute."""
         if not all(hasattr(x, attr) for x in (enum, patch)):
             return
         orig_rich_values = getattr(enum, attr)

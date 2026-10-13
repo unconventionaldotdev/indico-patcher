@@ -6,6 +6,7 @@ from enum import Enum
 import pytest
 from pytest import raises
 
+from indico.util.enum import IndicoIntEnum
 from indico.util.enum import RichIntEnum
 
 from indico_patcher.enums import patch_enum
@@ -42,6 +43,18 @@ def RichTarotCard():
             return self.__arcana__[self]
 
     return RichTarotCard
+
+
+@pytest.fixture
+def TitledTarotCard():
+    class TitledTarotCard(IndicoIntEnum):
+        __titles__ = ["The Fool"]
+        the_fool = 0
+
+        def get_title(self):
+            return self.__titles__[self.value]
+
+    return TitledTarotCard
 
 
 def test_patch_enum(TarotCard):
@@ -85,11 +98,23 @@ def test_patch_enum_only_for_enums(TarotCard):
             pass
 
 
-def test_patch_enum_with_rich_attrs(TarotCard):
-    with raises(ValueError):
-        @patch_enum(TarotCard, rich_attrs=("__arcana__",))
-        class _TarotCard(Enum):
-            pass
+def test_patch_enum_without_rich_attrs(TitledTarotCard):
+    @patch_enum(TitledTarotCard)
+    class _TarotCard(IndicoIntEnum):
+        __titles__ = ["The Magician"]
+        the_magician = 1
+
+    assert TitledTarotCard.__titles__ == ["The Fool"]
+
+
+def test_patch_enum_with_rich_attrs(TitledTarotCard):
+    @patch_enum(TitledTarotCard, rich_attrs=("__titles__",))
+    class _TarotCard(IndicoIntEnum):
+        __titles__ = ["The Magician"]
+        the_magician = 1
+
+    assert TitledTarotCard.the_fool.get_title() == "The Fool"
+    assert TitledTarotCard.the_magician.get_title() == "The Magician"
 
 
 def test_patch_richenum(RichTarotCard):

@@ -155,26 +155,24 @@ class SuperProxy:
 
 
 class SuperDispatcher:
-    """A replacement for super in the globals of the modules where patch classes are defined.
+    """A replacement for super in the globals of the modules where patch classes call super().
 
-    Calls from patch class members go to the SuperProxy carried by their code (see `_bind_super_proxy`),
-    while any other call goes to the super that was there before, so it keeps working as usual.
-    A custom super that was there before is called from the frame of the dispatcher, which matters
-    if it inspects frames.
+    Calls from patched members go to the SuperProxy attached to their code (see `_attach_super_proxy`),
+    and any other call behaves like the built-in super.
     """
-
-    def __init__(self, fallback: Any) -> None:
-        self.fallback = fallback
 
     def __call__(self, *args: Any) -> Any:
         frame = sys._getframe(1)
-        consts = frame.f_code.co_consts
-        if consts and isinstance(consts[-1], SuperProxy):
-            return consts[-1](*args)
-        if args or self.fallback is not builtins.super:
-            return self.fallback(*args)
-        # Without arguments, builtin super() would look them up in this frame instead of the caller's
-        return builtins.super(*_get_super_args(frame))
+        if super_proxy := _get_super_proxy(frame.f_code):
+            return super_proxy(*args)
+        if args:
+            return builtins.super(*args)
+        # Without arguments, the built-in super() would take them from this frame instead of the caller's
+        code, frame_locals = frame.f_code, frame.f_locals
+        if not code.co_argcount or "__class__" not in frame_locals or code.co_varnames[0] not in frame_locals:
+            raise RuntimeError("super(): no class or first argument")
+        return builtins.super(frame_locals["__class__"], frame_locals[code.co_varnames[0]])
+
 
 
 def get_members(cls: type) -> MappingProxyType[str, Any]:
@@ -278,7 +276,7 @@ def _patch_methodlike(orig_class: PatchedClass, method_name: str, method: method
         raise ValueError(f"Unsupported category '{category}'")
     # Keep a reference to the original method-like member
     _store_unpatched(orig_class, method_name, category)
-    # Override super() in the method globals
+    # Inject super() in the method
     # XXX: Type is casted and type checking is disabled because mypy infers the wrong types
     #      for __func__ in classmethods (https://github.com/python/mypy/issues/3482)
     func = method if isinstance(method, FunctionType) else cast(FunctionType, method.__func__)
@@ -324,10 +322,10 @@ def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) 
 
 
 def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> FunctionType:
-    """Return a new function from which super() will call SuperProxy().
+    """Return a new function from which super() will call SuperProxy(), installing a SuperDispatcher in its module.
 
     The new function keeps the globals of its module, so that names bound or mocked there later are
-    seen, and super in them is replaced with a SuperDispatcher that finds the SuperProxy from the code.
+    seen. Its code carries the SuperProxy, which the SuperDispatcher replacing super in those globals finds.
 
     Decorated functions are called from the closure of their wrappers, so the functions
     in the closure that (directly or through their own closures) call super() from a patch
@@ -348,8 +346,7 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
             return copies[fn]
         code = fn.__code__
         if inject_proxy and _uses_super(code):
-            code = _bind_super_proxy(code, super_proxy)
-            _install_super_dispatcher(fn.__globals__)
+            code = _attach_super_proxy(code, super_proxy)
         closure = fn.__closure__ or ()
         cells = [CellType() if _reaches_patch_super(_get_cell_contents(cell), patch_classes) else cell
                  for cell in closure]
@@ -366,7 +363,12 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
             new_func.__wrapped__ = copies[wrapped]  # type: ignore[attr-defined]
         return new_func
 
-    return copy_with_closure(func, inject_proxy=True)
+    new_func = copy_with_closure(func, inject_proxy=True)
+    # The SuperProxy in the code of the copies is only found through the super global of their module
+    for fn in copies.values():
+        if _get_super_proxy(fn.__code__):
+            _install_super_dispatcher(fn.__globals__)
+    return new_func
 
 
 def _uses_super(code: CodeType) -> bool:
@@ -374,7 +376,7 @@ def _uses_super(code: CodeType) -> bool:
     return "super" in code.co_names or any(_uses_super(const) for const in code.co_consts if _is_function_code(const))
 
 
-def _bind_super_proxy(code: CodeType, super_proxy: SuperProxy) -> CodeType:
+def _attach_super_proxy(code: CodeType, super_proxy: SuperProxy) -> CodeType:
     """Return a copy of a code object, and of the functions defined in it, that carries a SuperProxy.
 
     The SuperProxy is added as a constant that is never loaded by the bytecode. This makes every copy
@@ -382,9 +384,15 @@ def _bind_super_proxy(code: CodeType, super_proxy: SuperProxy) -> CodeType:
     (e.g. from a mixin) still get the SuperProxy of the class they were patched into.
     Classes defined in it are left as they are, since super() in their methods is not about the patch.
     """
-    consts = tuple(_bind_super_proxy(const, super_proxy) if _is_function_code(const) else const
+    consts = tuple(_attach_super_proxy(const, super_proxy) if _is_function_code(const) else const
                    for const in code.co_consts)
     return code.replace(co_consts=(*consts, super_proxy))
+
+
+def _get_super_proxy(code: CodeType) -> SuperProxy | None:
+    """Get the SuperProxy attached to a code object by `_attach_super_proxy`, if any."""
+    consts = code.co_consts
+    return consts[-1] if consts and isinstance(consts[-1], SuperProxy) else None
 
 
 def _is_function_code(const: Any) -> bool:
@@ -395,22 +403,7 @@ def _is_function_code(const: Any) -> bool:
 def _install_super_dispatcher(globals: dict[str, Any]) -> None:
     """Replace super in the globals of a module with a SuperDispatcher, unless already done."""
     if not isinstance(globals.get("super"), SuperDispatcher):
-        globals["super"] = SuperDispatcher(globals.get("super", builtins.super))
-
-
-def _get_super_args(frame: FrameType) -> tuple[Any, Any]:
-    """Get the class and instance that super() takes from the frame it's called in, failing like it."""
-    code = frame.f_code
-    if not code.co_argcount:
-        raise RuntimeError("super(): no arguments")
-    if "__class__" not in code.co_freevars:
-        raise RuntimeError("super(): __class__ cell not found")
-    frame_locals = frame.f_locals
-    if "__class__" not in frame_locals:
-        raise RuntimeError("super(): empty __class__ cell")
-    if code.co_varnames[0] not in frame_locals:
-        raise RuntimeError("super(): arg[0] deleted")
-    return frame_locals["__class__"], frame_locals[code.co_varnames[0]]
+        globals["super"] = SuperDispatcher()
 
 
 def _inject_descriptor_super_proxy(func: Any, orig_class: PatchedClass) -> Any:

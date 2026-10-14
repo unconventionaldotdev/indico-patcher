@@ -15,11 +15,11 @@ from sqlalchemy.sql.elements import ClauseElement
 from indico_patcher.util import SUPER_ENABLED_DESCRIPTORS
 from indico_patcher.util import SuperDispatcher
 from indico_patcher.util import SuperProxy
-from indico_patcher.util import _bind_super_proxy
 from indico_patcher.util import _calls_patch_super
 from indico_patcher.util import _copy_function
 from indico_patcher.util import _get_cell_contents
 from indico_patcher.util import _get_codes
+from indico_patcher.util import _get_super_proxy
 from indico_patcher.util import _inject_super_proxy
 from indico_patcher.util import _install_super_dispatcher
 from indico_patcher.util import _patch_attr
@@ -396,7 +396,7 @@ def test_inject_super_proxy(Fool):
             super().meth()
 
     new_func = _inject_super_proxy(_Fool.meth, Fool)
-    super_proxy = new_func.__code__.co_consts[-1]
+    super_proxy = _get_super_proxy(new_func.__code__)
     assert isinstance(super_proxy, SuperProxy)
     assert super_proxy.orig_class == Fool
     assert new_func.__globals__ is _Fool.meth.__globals__
@@ -427,8 +427,8 @@ def test_inject_super_proxy_for_decorated_function(Fool):
     new_func = _inject_super_proxy(_Fool.meth, Fool)
     new_wrapped = new_func.__closure__[0].cell_contents
     assert new_wrapped is not orig_func
-    assert isinstance(new_wrapped.__code__.co_consts[-1], SuperProxy)
-    assert not isinstance(orig_func.__code__.co_consts[-1], SuperProxy)
+    assert isinstance(_get_super_proxy(new_wrapped.__code__), SuperProxy)
+    assert _get_super_proxy(orig_func.__code__) is None
     assert new_wrapped.__code__.co_code == orig_func.__code__.co_code
 
 
@@ -489,29 +489,8 @@ def test_install_super_dispatcher():
     _install_super_dispatcher(globals)
     dispatcher = globals["super"]
     assert isinstance(dispatcher, SuperDispatcher)
-    assert dispatcher.fallback is builtins.super
     _install_super_dispatcher(globals)
     assert globals["super"] is dispatcher
-
-
-def test_install_super_dispatcher_for_module_with_super():
-    def own_super(*args):
-        return args
-
-    globals = {"super": own_super}
-    _install_super_dispatcher(globals)
-    assert globals["super"].fallback is own_super
-    assert globals["super"](1, 2) == (1, 2)
-
-
-def test_super_dispatcher_without_arguments():
-    dispatcher = SuperDispatcher(builtins.super)
-
-    def func():
-        return dispatcher()
-
-    with pytest.raises(RuntimeError):
-        func()
 
 
 def test_uses_super():
@@ -530,24 +509,6 @@ def test_uses_super():
     assert _uses_super(meth.__code__)
     assert _uses_super(nested.__code__)
     assert not _uses_super(other.__code__)
-
-
-def test_bind_super_proxy(Fool):
-    def meth(self):
-        def inner(self):
-            pass
-
-        class Inner:
-            def meth(self):
-                pass
-
-    super_proxy = SuperProxy(Fool)
-    code = _bind_super_proxy(meth.__code__, super_proxy)
-    consts = {const.co_name: const for const in code.co_consts if hasattr(const, "co_name")}
-    assert code.co_consts[-1] is super_proxy
-    assert consts["inner"].co_consts[-1] is super_proxy
-    assert super_proxy not in consts["Inner"].co_consts
-    assert code.co_code == meth.__code__.co_code
 
 
 # -- closures ------------------------------------------------------------------

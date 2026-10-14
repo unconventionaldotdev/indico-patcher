@@ -322,10 +322,11 @@ def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) 
 
 
 def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> FunctionType:
-    """Return a new function from which super() will call SuperProxy(), installing a SuperDispatcher in its module.
+    """Return a new function from which super() will call SuperProxy().
 
-    The new function keeps the globals of its module, so that names bound or mocked there later are
-    seen. Its code carries the SuperProxy, which the SuperDispatcher replacing super in those globals finds.
+    The new function keeps the globals of its module, so that names bound or mocked there later are seen.
+    If it calls super() from a patch class (or one of its bases), its code carries the SuperProxy, which
+    the SuperDispatcher installed as super in those globals finds.
 
     Decorated functions are called from the closure of their wrappers, so the functions
     in the closure that (directly or through their own closures) call super() from a patch
@@ -341,12 +342,13 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
     patch_classes = {cls for patch_class in orig_class.__patches__ for cls in patch_class.__mro__}
     copies: dict[FunctionType, FunctionType] = {}
 
-    def copy_with_closure(fn: FunctionType, inject_proxy: bool) -> FunctionType:
+    def copy_with_closure(fn: FunctionType) -> FunctionType:
         if fn in copies:
             return copies[fn]
         code = fn.__code__
-        if inject_proxy and _uses_super(code):
+        if _calls_patch_super(fn, patch_classes):
             code = _attach_super_proxy(code, super_proxy)
+            _install_super_dispatcher(fn.__globals__)
         closure = fn.__closure__ or ()
         cells = [CellType() if _reaches_patch_super(_get_cell_contents(cell), patch_classes) else cell
                  for cell in closure]
@@ -354,37 +356,25 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
         copies[fn] = new_func = _copy_function(fn, code, tuple(cells) or None)
         for cell, new_cell in zip(closure, cells, strict=True):
             if new_cell is not cell:
-                new_cell.cell_contents = copy_with_closure(
-                    cell.cell_contents, _calls_patch_super(cell.cell_contents, patch_classes)
-                )
+                new_cell.cell_contents = copy_with_closure(cell.cell_contents)
         # Keep __wrapped__ pointing at the copy of the wrapped function, when it was copied
         wrapped = fn.__dict__.get("__wrapped__")
         if isinstance(wrapped, FunctionType) and wrapped in copies:
             new_func.__wrapped__ = copies[wrapped]  # type: ignore[attr-defined]
         return new_func
 
-    new_func = copy_with_closure(func, inject_proxy=True)
-    # The SuperProxy in the code of the copies is only found through the super global of their module
-    for fn in copies.values():
-        if _get_super_proxy(fn.__code__):
-            _install_super_dispatcher(fn.__globals__)
-    return new_func
-
-
-def _uses_super(code: CodeType) -> bool:
-    """Check whether a code object, or a function defined in it, references super."""
-    return "super" in code.co_names or any(_uses_super(const) for const in code.co_consts if _is_function_code(const))
+    return copy_with_closure(func)
 
 
 def _attach_super_proxy(code: CodeType, super_proxy: SuperProxy) -> CodeType:
-    """Return a copy of a code object, and of the functions defined in it, that carries a SuperProxy.
+    """Return a copy of a code object, and of the functions defined in it, with a SuperProxy as last constant.
 
-    The SuperProxy is added as a constant that is never loaded by the bytecode. This makes every copy
-    a different code object, so members of patch classes that are patched into several classes
-    (e.g. from a mixin) still get the SuperProxy of the class they were patched into.
-    Classes defined in it are left as they are, since super() in their methods is not about the patch.
+    The constant is never loaded by the bytecode; it carries the SuperProxy, so a member patched into several
+    classes (e.g. from a mixin) has one per copy. Class bodies defined in it are left as they are, since
+    super() in their methods is about their own class.
     """
-    consts = tuple(_attach_super_proxy(const, super_proxy) if _is_function_code(const) else const
+    consts = tuple(_attach_super_proxy(const, super_proxy)
+                   if isinstance(const, CodeType) and const.co_flags & CO_OPTIMIZED else const
                    for const in code.co_consts)
     return code.replace(co_consts=(*consts, super_proxy))
 
@@ -393,11 +383,6 @@ def _get_super_proxy(code: CodeType) -> SuperProxy | None:
     """Get the SuperProxy attached to a code object by `_attach_super_proxy`, if any."""
     consts = code.co_consts
     return consts[-1] if consts and isinstance(consts[-1], SuperProxy) else None
-
-
-def _is_function_code(const: Any) -> bool:
-    """Check whether a constant is the code of a function (i.e. not of a class body)."""
-    return isinstance(const, CodeType) and bool(const.co_flags & CO_OPTIMIZED)
 
 
 def _install_super_dispatcher(globals: dict[str, Any]) -> None:

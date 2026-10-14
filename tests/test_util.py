@@ -28,7 +28,6 @@ from indico_patcher.util import _patch_methodlike
 from indico_patcher.util import _patch_propertylike
 from indico_patcher.util import _reaches_patch_super
 from indico_patcher.util import _store_unpatched
-from indico_patcher.util import _uses_super
 from indico_patcher.util import get_members
 from indico_patcher.util import patch_member
 
@@ -395,6 +394,7 @@ def test_inject_super_proxy(Fool):
         def meth(self):
             super().meth()
 
+    Fool.__patches__.append(_Fool)
     new_func = _inject_super_proxy(_Fool.meth, Fool)
     super_proxy = _get_super_proxy(new_func.__code__)
     assert isinstance(super_proxy, SuperProxy)
@@ -405,8 +405,6 @@ def test_inject_super_proxy(Fool):
     assert new_func.__name__ == _Fool.meth.__name__
     assert new_func.__defaults__ == _Fool.meth.__defaults__
     assert new_func.__closure__ == _Fool.meth.__closure__
-
-
 
 
 def test_inject_super_proxy_for_decorated_function(Fool):
@@ -493,22 +491,6 @@ def test_install_super_dispatcher():
     assert globals["super"] is dispatcher
 
 
-def test_uses_super():
-    def meth(self):
-        super().meth()
-
-    def nested(self):
-        def inner(self):
-            super().meth()
-
-    def other(self):
-        class Inner:
-            def meth(self):
-                super().meth()
-
-    assert _uses_super(meth.__code__)
-    assert _uses_super(nested.__code__)
-    assert not _uses_super(other.__code__)
 
 
 # -- closures ------------------------------------------------------------------

@@ -5,6 +5,8 @@ import contextlib
 from collections import defaultdict
 from contextlib import contextmanager
 from functools import wraps
+from textwrap import dedent
+from types import ModuleType
 from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import call
@@ -1272,6 +1274,23 @@ def test_patch_class_keeps_super_outside_patch_classes(Fool):
             super().meth(arg)
 
     assert Child().meth() == "child>base>base"
+
+
+def test_patch_class_for_mixin_of_other_module(Fool):
+    mixins = ModuleType("mixins")
+    exec(dedent("""
+        class Mixin:
+            def meth(self, arg):
+                super().meth(f"{arg}>mixin")
+    """), vars(mixins))
+
+    @patch_class(Fool)
+    class _Fool(mixins.Mixin):
+        pass
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc>mixin")
+    assert "super" in vars(mixins)
 
 
 def test_patch_class_keeps_globals_of_other_modules(Fool):

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.0 (unreleased)
+
+- Fixed patched members using a snapshot of their module globals, which missed names bound or mocked later and broke `super(_Patch, self)` in module-level patch classes.
+- Added a `super` global to the modules where patch classes call `super()`, which behaves like the built-in outside patched members but makes `super()` calls there slower.
+- Copied the code of patch class members that use `super` into patched members, so their code can't be marshalled anymore.
+
 ## v0.5.1
 
 - Fixed explicit `super(cls, self)` calls on non-patch classes to behave like the built-in.

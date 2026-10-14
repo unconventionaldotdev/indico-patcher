@@ -1238,6 +1238,20 @@ def test_patch_class_for_method_with_super_in_nested_function(Fool):
     Fool.__probe__.assert_called_once_with("abc")
 
 
+def test_patch_class_for_method_passing_super_to_function(Fool):
+    def call_super(super_, *args):
+        return super_(*args)
+
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            call_super(super).meth(f"{arg}>implicit")
+            call_super(super, _Fool, self).meth(f"{arg}>explicit")
+
+    Fool().meth("abc")
+    assert Fool.__probe__.call_args_list == [call("abc>implicit"), call("abc>explicit")]
+
+
 def test_patch_class_for_mixin_with_super_in_class_and_subclass(Fool):
     class Mixin:
         def meth(self, arg):

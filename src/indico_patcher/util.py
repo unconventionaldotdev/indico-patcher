@@ -163,7 +163,7 @@ class SuperDispatcher:
 
     def __call__(self, *args: Any) -> Any:
         frame = sys._getframe(1)
-        if super_proxy := _get_super_proxy(frame.f_code):
+        if super_proxy := self._find_super_proxy(frame):
             return super_proxy(*args)
         if args:
             return builtins.super(*args)
@@ -173,6 +173,20 @@ class SuperDispatcher:
             raise RuntimeError("super(): no class or first argument")
         return builtins.super(frame_locals["__class__"], frame_locals[code.co_varnames[0]])
 
+    @staticmethod
+    def _find_super_proxy(frame: FrameType | None) -> SuperProxy | None:
+        """Find the SuperProxy of the patched member that super is called from.
+
+        Frames are walked up so that super passed from a patched member to another function still finds it,
+        stopping at functions of other classes calling super(), since super() there is about their own class.
+        """
+        while frame:
+            if super_proxy := _get_super_proxy(frame.f_code):
+                return super_proxy
+            if "__class__" in frame.f_code.co_freevars:
+                return None
+            frame = frame.f_back
+        return None
 
 
 def get_members(cls: type) -> MappingProxyType[str, Any]:

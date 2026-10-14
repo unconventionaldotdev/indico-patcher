@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.1 (unreleased)
+## v0.5.1
 
 - Fixed explicit `super(cls, self)` calls on non-patch classes to behave like the built-in.
 

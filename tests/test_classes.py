@@ -245,6 +245,21 @@ def test_patch_class_for_property_with_super(Fool):
     assert Fool().prop == "propprop"
 
 
+def test_patch_class_for_property_with_explicit_super(Fool):
+    class Magician(Fool):
+        @property
+        def prop(self):
+            return "magician"
+
+    @patch_class(Magician)
+    class _Magician:
+        @property
+        def prop(self):
+            return super(Magician, self).prop + "-patched"
+
+    assert Magician().prop == "prop-patched"
+
+
 def test_patch_class_for_new_property_with_super(Fool):
     @patch_class(Fool)
     class _Fool:
@@ -589,6 +604,38 @@ def test_patch_class_for_method_with_super(Fool):
     assert Fool.__probe__.call_count == 2
 
 
+def test_patch_class_for_method_with_explicit_super(Fool):
+    class Magician(Fool):
+        def meth(self, arg):
+            self.__probe__("Magician")
+
+    class Sorcerer(Magician):
+        pass
+
+    @patch_class(Magician)
+    class _Magician:
+        def meth(self, arg):
+            super(Magician, self).meth(arg)
+
+    Magician().meth("abc")
+    Magician.__probe__.assert_called_once_with("abc")
+
+    Magician.__probe__.reset_mock()
+    Sorcerer().meth("abc")
+    Magician.__probe__.assert_called_once_with("abc")
+
+
+def test_patch_class_for_method_with_explicit_super_on_patch_class(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self):
+            super(_Fool, self).meth()  # noqa: UP008
+            self.__probe__()
+
+    Fool().meth()
+    assert Fool.__probe__.call_count == 2
+
+
 def test_patch_class_for_method_with_keyword_only_defaults(Fool):
     @patch_class(Fool)
     class _Fool:
@@ -868,6 +915,30 @@ def test_patch_class_for_hybrid_method_with_super(Fool):
     assert str(Fool.hmeth(2)) == str((Fool.id + 2) * 10)
 
 
+def test_patch_class_for_hybrid_method_with_explicit_super(Fool):
+    class Magician(Fool):
+        @hybrid_method
+        def hmeth(self, n):
+            return self.id * 100 * n
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return cls.id * 100 * n
+
+    @patch_class(Magician)
+    class _Magician:
+        @hybrid_method
+        def hmeth(self, n):
+            return super(Magician, self).hmeth(n) * 10
+
+        @hmeth.expression
+        def hmeth(cls, n):
+            return super(Magician, cls).hmeth(n) * 10
+
+    assert Magician(id=3).hmeth(2) == 50
+    assert str(Magician.hmeth(2)) == str((Magician.id + 2) * 10)
+
+
 def test_patch_class_for_hybrid_method_with_super_without_expression(Fool):
     @patch_class(Fool)
     class _Fool:
@@ -953,6 +1024,21 @@ def test_patch_class_for_decorated_method_with_super(Fool):
 
     Fool().meth("abc")
     Fool.__probe__.assert_called_once_with("abc")
+
+
+def test_patch_class_for_decorated_method_with_explicit_super(Fool):
+    class Magician(Fool):
+        def meth(self, arg):
+            self.__probe__("Magician")
+
+    @patch_class(Magician)
+    class _Magician:
+        @decorator
+        def meth(self, arg):
+            super(Magician, self).meth(arg)
+
+    Magician().meth("abc")
+    Magician.__probe__.assert_called_once_with("abc")
 
 
 def test_patch_class_for_decorated_method_with_super_multiple_times(Fool):

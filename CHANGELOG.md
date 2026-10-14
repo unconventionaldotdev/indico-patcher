@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.1 (unreleased)
+
+- Fixed explicit `super(cls, self)` calls on non-patch classes to behave like the built-in.
+
 ## v0.5.0
 
 - Added support for patching `declared_attr` members in models.

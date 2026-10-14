@@ -1238,6 +1238,24 @@ def test_patch_class_for_method_with_super_in_nested_function(Fool):
     Fool.__probe__.assert_called_once_with("abc")
 
 
+def test_patch_class_for_method_with_super_in_nested_class(Fool):
+    class Base:
+        def meth(self, arg):
+            return f"{arg}>base"
+
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            class Inner(Base):
+                def meth(self, arg):
+                    return super().meth(f"{arg}>inner")
+
+            super().meth(Inner().meth(arg))
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc>inner>base")
+
+
 def test_patch_class_for_method_passing_super_to_function(Fool):
     def call_super(super_, *args):
         return super_(*args)

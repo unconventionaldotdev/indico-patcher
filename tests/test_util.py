@@ -491,6 +491,18 @@ def test_install_super_dispatcher():
     assert globals["super"] is dispatcher
 
 
+def test_superdispatcher_in_isinstance():
+    assert isinstance(builtins.super(int, 1), SuperDispatcher())
+
+
+def test_superdispatcher_without_arguments():
+    dispatcher = SuperDispatcher()
+
+    def func():
+        return dispatcher()
+
+    with pytest.raises(RuntimeError):
+        func()
 
 
 # -- closures ------------------------------------------------------------------

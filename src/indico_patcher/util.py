@@ -173,6 +173,10 @@ class SuperDispatcher:
             raise RuntimeError("super(): no class or first argument")
         return builtins.super(frame_locals["__class__"], frame_locals[code.co_varnames[0]])
 
+    def __instancecheck__(self, instance: Any) -> bool:
+        """Check instances against the built-in super, so that `isinstance(obj, super)` keeps working."""
+        return isinstance(instance, builtins.super)
+
     @staticmethod
     def _find_super_proxy(frame: FrameType | None) -> SuperProxy | None:
         """Find the SuperProxy of the patched member that super is called from.

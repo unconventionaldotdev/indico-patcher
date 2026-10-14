@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import builtins
 import sys
 from functools import partial
 from types import CellType
@@ -45,6 +46,9 @@ class SuperProxy:
         # Simulate the behavior of super() when called without arguments
         if patch_class is None:
             patch_class, obj = self._get_defaults()
+        # Calls to super() on other classes (e.g. the original class) skip the previous versions
+        elif not self._is_patch_class(patch_class):
+            return builtins.super(patch_class, obj)
 
         class duper:
             """Interceptor for calls to super().getattr() in the patch class."""
@@ -95,6 +99,13 @@ class SuperProxy:
                 return f"<duper: {classname}, {obj}>"
 
         return duper()
+
+    def _is_patch_class(self, cls: type) -> bool:
+        """Check whether a class is one of the patch classes of the original class or their bases."""
+        # Bases shared with the original class (e.g. object) are not part of the patches
+        return cls not in self.orig_class.__mro__ and any(
+            cls in patch_class.__mro__ for patch_class in self.orig_class.__patches__
+        )
 
     @staticmethod
     def _get_caller_code() -> Any:

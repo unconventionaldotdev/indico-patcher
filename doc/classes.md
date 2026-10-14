@@ -58,6 +58,9 @@ Override an existing method in the original class by defining a method with the 
 
 In this example, the PUT and DELETE process methods of the class `RHUserBlock` are intercepted to check if the user can be blocked with the newly added `_can_block_user()`. If not, an exception is raised with `error_message`. Otherwise, the original method is called.
 
+> [!NOTE]
+> Both `super()` and `super(_RHUserBlock, self)` call the previous version of the method, which is the original one or the one from an earlier patch. Passing any other class to `super()` behaves like the built-in. For instance, `super(RHUserBlock, self)` skips the original method and calls the one inherited from the next class in the MRO.
+
 ```python
 @patch(User)
 class _User:

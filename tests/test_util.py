@@ -119,6 +119,8 @@ def test_superproxy_repr(Fool):
     class _Fool:
         pass
 
+    # Register the patch class as patch_class() would, so SuperProxy treats it as one
+    Fool.__patches__.append(_Fool)
     fool = Fool()
     classname = f"{_Fool.__module__}.{_Fool.__name__}"
     duper = SuperProxy(Fool)(_Fool, fool)
@@ -127,6 +129,21 @@ def test_superproxy_repr(Fool):
     assert repr(duper) == f"<duper: {classname}, None>"
     duper = SuperProxy(Fool)()
     assert repr(duper) == "<duper: None, None>"
+
+
+def test_superproxy_for_non_patch_class(Fool):
+    class Base:
+        pass
+
+    class _Fool(Base):
+        pass
+
+    Fool.__patches__.append(_Fool)
+    fool = Fool()
+    assert type(SuperProxy(Fool)(_Fool, fool)).__name__ == "duper"
+    assert type(SuperProxy(Fool)(Base, fool)).__name__ == "duper"
+    assert isinstance(SuperProxy(Fool)(Fool, fool), super)
+    assert isinstance(SuperProxy(Fool)(object, fool), super)
 
 
 # -- get full dict -------------------------------------------------------------

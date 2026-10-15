@@ -6,6 +6,7 @@ from __future__ import annotations
 import builtins
 import sys
 from functools import partial
+from inspect import CO_OPTIMIZED
 from types import CellType
 from types import CodeType
 from types import FrameType
@@ -153,6 +154,45 @@ class SuperProxy:
         return stack[-1]
 
 
+class SuperDispatcher:
+    """A replacement for super in the globals of the modules where patch classes call super().
+
+    Calls from patched members go to the SuperProxy attached to their code (see `_attach_super_proxy`),
+    and any other call behaves like the built-in super.
+    """
+
+    def __call__(self, *args: Any) -> Any:
+        frame = sys._getframe(1)
+        if super_proxy := self._find_super_proxy(frame):
+            return super_proxy(*args)
+        if args:
+            return builtins.super(*args)
+        # Without arguments, the built-in super() would take them from this frame instead of the caller's
+        code, frame_locals = frame.f_code, frame.f_locals
+        if not code.co_argcount or "__class__" not in frame_locals or code.co_varnames[0] not in frame_locals:
+            raise RuntimeError("super(): no class or first argument")
+        return builtins.super(frame_locals["__class__"], frame_locals[code.co_varnames[0]])
+
+    def __instancecheck__(self, instance: Any) -> bool:
+        """Check instances against the built-in super, so that `isinstance(obj, super)` keeps working."""
+        return isinstance(instance, builtins.super)
+
+    @staticmethod
+    def _find_super_proxy(frame: FrameType | None) -> SuperProxy | None:
+        """Find the SuperProxy of the patched member that super is called from.
+
+        Frames are walked up so that super passed from a patched member to another function still finds it,
+        stopping at functions of other classes calling super(), since super() there is about their own class.
+        """
+        while frame:
+            if super_proxy := _get_super_proxy(frame.f_code):
+                return super_proxy
+            if "__class__" in frame.f_code.co_freevars:
+                return None
+            frame = frame.f_back
+        return None
+
+
 def get_members(cls: type) -> MappingProxyType[str, Any]:
     """Get a dictionary of all the members of the base classes up to object."""
     if cls is object:
@@ -254,7 +294,7 @@ def _patch_methodlike(orig_class: PatchedClass, method_name: str, method: method
         raise ValueError(f"Unsupported category '{category}'")
     # Keep a reference to the original method-like member
     _store_unpatched(orig_class, method_name, category)
-    # Override super() in the method globals
+    # Inject super() in the method
     # XXX: Type is casted and type checking is disabled because mypy infers the wrong types
     #      for __func__ in classmethods (https://github.com/python/mypy/issues/3482)
     func = method if isinstance(method, FunctionType) else cast(FunctionType, method.__func__)
@@ -302,6 +342,10 @@ def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) 
 def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> FunctionType:
     """Return a new function from which super() will call SuperProxy().
 
+    The new function keeps the globals of its module, so that names bound or mocked there later are seen.
+    If it calls super() from a patch class (or one of its bases), its code carries the SuperProxy, which
+    the SuperDispatcher installed as super in those globals finds.
+
     Decorated functions are called from the closure of their wrappers, so the functions
     in the closure that (directly or through their own closures) call super() from a patch
     class are copied too. Other closure functions are kept as they are, since decorators
@@ -316,27 +360,53 @@ def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> Functio
     patch_classes = {cls for patch_class in orig_class.__patches__ for cls in patch_class.__mro__}
     copies: dict[FunctionType, FunctionType] = {}
 
-    def copy_with_closure(fn: FunctionType, inject_proxy: bool) -> FunctionType:
+    def copy_with_closure(fn: FunctionType) -> FunctionType:
         if fn in copies:
             return copies[fn]
-        globals = {**fn.__globals__, "super": super_proxy} if inject_proxy else fn.__globals__
+        code = fn.__code__
+        if _calls_patch_super(fn, patch_classes):
+            code = _attach_super_proxy(code, super_proxy)
+            _install_super_dispatcher(fn.__globals__)
         closure = fn.__closure__ or ()
         cells = [CellType() if _reaches_patch_super(_get_cell_contents(cell), patch_classes) else cell
                  for cell in closure]
         # Store the copy before filling its closure since functions can reference themselves
-        copies[fn] = new_func = _copy_function(fn, globals, tuple(cells) or None)
+        copies[fn] = new_func = _copy_function(fn, code, tuple(cells) or None)
         for cell, new_cell in zip(closure, cells, strict=True):
             if new_cell is not cell:
-                new_cell.cell_contents = copy_with_closure(
-                    cell.cell_contents, _calls_patch_super(cell.cell_contents, patch_classes)
-                )
+                new_cell.cell_contents = copy_with_closure(cell.cell_contents)
         # Keep __wrapped__ pointing at the copy of the wrapped function, when it was copied
         wrapped = fn.__dict__.get("__wrapped__")
         if isinstance(wrapped, FunctionType) and wrapped in copies:
             new_func.__wrapped__ = copies[wrapped]  # type: ignore[attr-defined]
         return new_func
 
-    return copy_with_closure(func, inject_proxy=True)
+    return copy_with_closure(func)
+
+
+def _attach_super_proxy(code: CodeType, super_proxy: SuperProxy) -> CodeType:
+    """Return a copy of a code object, and of the functions defined in it, with a SuperProxy as last constant.
+
+    The constant is never loaded by the bytecode; it carries the SuperProxy, so a member patched into several
+    classes (e.g. from a mixin) has one per copy. Class bodies defined in it are left as they are, since
+    super() in their methods is about their own class.
+    """
+    consts = tuple(_attach_super_proxy(const, super_proxy)
+                   if isinstance(const, CodeType) and const.co_flags & CO_OPTIMIZED else const
+                   for const in code.co_consts)
+    return code.replace(co_consts=(*consts, super_proxy))
+
+
+def _get_super_proxy(code: CodeType) -> SuperProxy | None:
+    """Get the SuperProxy attached to a code object by `_attach_super_proxy`, if any."""
+    consts = code.co_consts
+    return consts[-1] if consts and isinstance(consts[-1], SuperProxy) else None
+
+
+def _install_super_dispatcher(globals: dict[str, Any]) -> None:
+    """Replace super in the globals of a module with a SuperDispatcher, unless already done."""
+    if not isinstance(globals.get("super"), SuperDispatcher):
+        globals["super"] = SuperDispatcher()
 
 
 def _inject_descriptor_super_proxy(func: Any, orig_class: PatchedClass) -> Any:
@@ -394,9 +464,9 @@ def _calls_patch_super(func: FunctionType, patch_classes: set[type]) -> bool:
     return "__class__" in cells and _get_cell_contents(cells["__class__"]) in patch_classes
 
 
-def _copy_function(func: FunctionType, globals: dict[str, Any], closure: tuple[CellType, ...] | None) -> FunctionType:
-    """Return a copy of a function with the given globals and closure."""
-    new_func = FunctionType(func.__code__, globals, func.__name__, func.__defaults__, closure)
+def _copy_function(func: FunctionType, code: CodeType, closure: tuple[CellType, ...] | None) -> FunctionType:
+    """Return a copy of a function with the given code and closure."""
+    new_func = FunctionType(code, func.__globals__, func.__name__, func.__defaults__, closure)
     # FunctionType() only takes the code, globals, name, defaults and closure, so copy the
     # rest, which includes what functools.wraps sets on wrappers
     for attr in ("__kwdefaults__", "__qualname__", "__module__", "__doc__", "__annotations__", "__type_params__"):

@@ -1,6 +1,7 @@
 # This file is part of indico-patcher.
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
+import builtins
 from collections import defaultdict
 from functools import wraps
 from unittest import mock
@@ -12,12 +13,15 @@ from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.elements import ClauseElement
 
 from indico_patcher.util import SUPER_ENABLED_DESCRIPTORS
+from indico_patcher.util import SuperDispatcher
 from indico_patcher.util import SuperProxy
 from indico_patcher.util import _calls_patch_super
 from indico_patcher.util import _copy_function
 from indico_patcher.util import _get_cell_contents
 from indico_patcher.util import _get_codes
+from indico_patcher.util import _get_super_proxy
 from indico_patcher.util import _inject_super_proxy
+from indico_patcher.util import _install_super_dispatcher
 from indico_patcher.util import _patch_attr
 from indico_patcher.util import _patch_hybrid_method
 from indico_patcher.util import _patch_methodlike
@@ -386,18 +390,18 @@ def test_store_unpatched_member_from_parent(member_name, category, Fool):
 # -- inject super proxy --------------------------------------------------------
 
 def test_inject_super_proxy(Fool):
-    orig_meth = Fool.meth
-
     class _Fool:
         def meth(self):
-            pass
+            super().meth()
 
+    Fool.__patches__.append(_Fool)
     new_func = _inject_super_proxy(_Fool.meth, Fool)
-    super_proxy = new_func.__globals__["super"]
-    assert "super" not in orig_meth.__globals__
+    super_proxy = _get_super_proxy(new_func.__code__)
     assert isinstance(super_proxy, SuperProxy)
     assert super_proxy.orig_class == Fool
-    assert new_func.__code__ == _Fool.meth.__code__
+    assert new_func.__globals__ is _Fool.meth.__globals__
+    assert isinstance(new_func.__globals__["super"], SuperDispatcher)
+    assert new_func.__code__.co_code == _Fool.meth.__code__.co_code
     assert new_func.__name__ == _Fool.meth.__name__
     assert new_func.__defaults__ == _Fool.meth.__defaults__
     assert new_func.__closure__ == _Fool.meth.__closure__
@@ -421,9 +425,9 @@ def test_inject_super_proxy_for_decorated_function(Fool):
     new_func = _inject_super_proxy(_Fool.meth, Fool)
     new_wrapped = new_func.__closure__[0].cell_contents
     assert new_wrapped is not orig_func
-    assert isinstance(new_wrapped.__globals__["super"], SuperProxy)
-    assert "super" not in orig_func.__globals__
-    assert new_wrapped.__code__ == orig_func.__code__
+    assert isinstance(_get_super_proxy(new_wrapped.__code__), SuperProxy)
+    assert _get_super_proxy(orig_func.__code__) is None
+    assert new_wrapped.__code__.co_code == orig_func.__code__.co_code
 
 
 def test_inject_super_proxy_keeps_unrelated_closure_functions(Fool):
@@ -474,6 +478,31 @@ def test_inject_super_proxy_keeps_function_attributes(Fool):
     assert new_wrapped.__qualname__ == _Fool.meth.__wrapped__.__qualname__
     assert new_func.__qualname__ == _Fool.meth.__qualname__
     assert new_func.custom == "value"
+
+
+# -- super dispatcher ----------------------------------------------------------
+
+def test_install_super_dispatcher():
+    globals = {}
+    _install_super_dispatcher(globals)
+    dispatcher = globals["super"]
+    assert isinstance(dispatcher, SuperDispatcher)
+    _install_super_dispatcher(globals)
+    assert globals["super"] is dispatcher
+
+
+def test_superdispatcher_in_isinstance():
+    assert isinstance(builtins.super(int, 1), SuperDispatcher())
+
+
+def test_superdispatcher_without_arguments():
+    dispatcher = SuperDispatcher()
+
+    def func():
+        return dispatcher()
+
+    with pytest.raises(RuntimeError):
+        func()
 
 
 # -- closures ------------------------------------------------------------------
@@ -581,11 +610,11 @@ def test_copy_function():
         """Docstring."""
 
     func.custom = "value"
-    new_globals = {"foo": "bar"}
-    new_func = _copy_function(func, new_globals, None)
+    new_code = func.__code__.replace()
+    new_func = _copy_function(func, new_code, None)
     assert new_func is not func
-    assert new_func.__code__ == func.__code__
-    assert new_func.__globals__ is new_globals
+    assert new_func.__code__ is new_code
+    assert new_func.__globals__ is func.__globals__
     assert new_func.__closure__ is None
     assert new_func.__name__ == func.__name__
     assert new_func.__qualname__ == func.__qualname__
@@ -604,6 +633,6 @@ def test_copy_function_with_closure():
         return value
 
     cell = type(func.__closure__[0])(2)
-    new_func = _copy_function(func, func.__globals__, (cell,))
+    new_func = _copy_function(func, func.__code__, (cell,))
     assert new_func() == 2
     assert func() == 1

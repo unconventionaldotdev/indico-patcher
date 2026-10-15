@@ -79,6 +79,9 @@ class _User:
 
 Apply the same logic to add and override `@staticmethod`s and `@classmethod`s.
 
+> [!NOTE]
+> To make `super()` work in patched members, the modules where patch classes (or their bases, e.g. a mixin) call `super()` get a module-level `super` global, which works as a callable and in `isinstance`, but not otherwise as a type (e.g. in unions, `issubclass` or for `__name__`). Anywhere else in those modules it behaves like the built-in `super()`, though calls are slower. Reassigning `super` in such a module after patching breaks `super()` in the patched members.
+
 > [!IMPORTANT]
 > Overriding a method in the original class is fragile and can break in future versions of Indico if the original method is changed. A more reliable way to override a method in the original class is to intercept calls via the [`interceptable_function`](https://github.com/indico/indico/blob/v3.2.8/indico/core/signals/plugin.py#L121) signal.
 

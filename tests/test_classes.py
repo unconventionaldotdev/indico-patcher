@@ -1,8 +1,13 @@
 # This file is part of indico-patcher.
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
+import contextlib
 from collections import defaultdict
+from contextlib import contextmanager
 from functools import wraps
+from textwrap import dedent
+from types import ModuleType
+from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import call
 
@@ -141,7 +146,6 @@ def test_patch_class_multiple_times(Fool):
     unpatched_methods = Fool.__unpatched__["methods"]["meth"]
     assert len(unpatched_methods) == 2
     assert unpatched_methods[0] is orig_meth
-    assert unpatched_methods[1].__code__ is _Fool1.meth.__code__
 
     # Test that the method calls are properly chained through all patches
     Fool().meth()
@@ -1185,6 +1189,154 @@ def test_patch_class_for_decorated_method_without_super_keeps_wrapped_function(F
             return "no-super"
 
     assert Fool().meth("abc") == "no-super"
+
+
+# -- globals -------------------------------------------------------------------
+
+# Module-level so that patch class members look it up in the module globals
+def helper():
+    return "helper"
+
+
+class Joker:
+    def meth(self):
+        return "joker"
+
+
+# Module-level so that the patch class is a global of its own members instead of a closure cell
+@patch_class(Joker)
+class _Joker:
+    def meth(self):
+        return super(_Joker, self).meth() + "-patched"  # noqa: UP008
+
+
+def test_patch_class_for_method_with_super_of_module_level_patch_class():
+    assert Joker().meth() == "joker-patched"
+
+
+def test_patch_class_for_method_with_mocked_global(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            super().meth(helper())
+
+    with mock.patch(f"{__name__}.helper", return_value="mocked"):
+        Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("mocked")
+
+
+def test_patch_class_for_method_with_super_in_nested_function(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            def inner(self):
+                super().meth(arg)
+
+            inner(self)
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc")
+
+
+def test_patch_class_for_method_with_super_in_nested_class(Fool):
+    class Base:
+        def meth(self, arg):
+            return f"{arg}>base"
+
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            class Inner(Base):
+                def meth(self, arg):
+                    return super().meth(f"{arg}>inner")
+
+            super().meth(Inner().meth(arg))
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc>inner>base")
+
+
+def test_patch_class_for_method_passing_super_to_function(Fool):
+    def call_super(super_, *args):
+        return super_(*args)
+
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            call_super(super).meth(f"{arg}>implicit")
+            call_super(super, _Fool, self).meth(f"{arg}>explicit")
+
+    Fool().meth("abc")
+    assert Fool.__probe__.call_args_list == [call("abc>implicit"), call("abc>explicit")]
+
+
+def test_patch_class_for_mixin_with_super_in_class_and_subclass(Fool):
+    class Mixin:
+        def meth(self, arg):
+            super().meth(f"{arg}>mixin")
+
+    class Magician(Fool):
+        def meth(self, arg):
+            super().meth(f"{arg}>magician")
+
+    @patch_class(Fool)
+    class _Fool(Mixin):
+        pass
+
+    @patch_class(Magician)
+    class _Magician(Mixin):
+        pass
+
+    Magician().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc>mixin>magician>mixin")
+
+
+def test_patch_class_keeps_super_outside_patch_classes(Fool):
+    class Base:
+        def meth(self):
+            return "base"
+
+    class Child(Base):
+        def meth(self):
+            return f"child>{super().meth()}>{super(Child, self).meth()}"  # noqa: UP008
+
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            super().meth(arg)
+
+    assert Child().meth() == "child>base>base"
+
+
+def test_patch_class_for_mixin_of_other_module(Fool):
+    mixins = ModuleType("mixins")
+    exec(dedent("""
+        class Mixin:
+            def meth(self, arg):
+                super().meth(f"{arg}>mixin")
+    """), vars(mixins))
+
+    @patch_class(Fool)
+    class _Fool(mixins.Mixin):
+        pass
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc>mixin")
+    assert "super" in vars(mixins)
+
+
+def test_patch_class_keeps_globals_of_other_modules(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @contextmanager
+        def meth(self, arg):
+            super().meth(arg)
+            yield
+
+    with Fool().meth("abc"):
+        pass
+    Fool.__probe__.assert_called_once_with("abc")
+    assert "super" not in vars(contextlib)
 
 
 # -- SQLAlchemy: columns -------------------------------------------------------

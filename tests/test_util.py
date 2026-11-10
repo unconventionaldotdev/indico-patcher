@@ -23,6 +23,7 @@ from indico_patcher.util import _patch_hybrid_method
 from indico_patcher.util import _patch_methodlike
 from indico_patcher.util import _patch_propertylike
 from indico_patcher.util import _reaches_patch_super
+from indico_patcher.util import _rename_super
 from indico_patcher.util import _store_unpatched
 from indico_patcher.util import get_members
 from indico_patcher.util import patch_member
@@ -386,18 +387,17 @@ def test_store_unpatched_member_from_parent(member_name, category, Fool):
 # -- inject super proxy --------------------------------------------------------
 
 def test_inject_super_proxy(Fool):
-    orig_meth = Fool.meth
-
     class _Fool:
         def meth(self):
-            pass
+            super().meth()
 
+    Fool.__patches__.append(_Fool)
     new_func = _inject_super_proxy(_Fool.meth, Fool)
-    super_proxy = new_func.__globals__["super"]
-    assert "super" not in orig_meth.__globals__
+    [super_name] = set(new_func.__code__.co_names) - set(_Fool.meth.__code__.co_names)
+    super_proxy = new_func.__globals__[super_name]
     assert isinstance(super_proxy, SuperProxy)
     assert super_proxy.orig_class == Fool
-    assert new_func.__code__ == _Fool.meth.__code__
+    assert "super" not in new_func.__globals__
     assert new_func.__name__ == _Fool.meth.__name__
     assert new_func.__defaults__ == _Fool.meth.__defaults__
     assert new_func.__closure__ == _Fool.meth.__closure__
@@ -421,9 +421,23 @@ def test_inject_super_proxy_for_decorated_function(Fool):
     new_func = _inject_super_proxy(_Fool.meth, Fool)
     new_wrapped = new_func.__closure__[0].cell_contents
     assert new_wrapped is not orig_func
-    assert isinstance(new_wrapped.__globals__["super"], SuperProxy)
-    assert "super" not in orig_func.__globals__
-    assert new_wrapped.__code__ == orig_func.__code__
+    [super_name] = set(new_wrapped.__code__.co_names) - set(orig_func.__code__.co_names)
+    assert isinstance(new_wrapped.__globals__[super_name], SuperProxy)
+
+
+def test_inject_super_proxy_for_function_without_class_cell(Fool):
+    # A function defined outside the patch class and assigned to it gets no __class__ cell
+    def meth(self):
+        super(_Fool, self).meth()
+
+    class _Fool:
+        pass
+
+    _Fool.meth = meth
+    Fool.__patches__.append(_Fool)
+    new_func = _inject_super_proxy(meth, Fool)
+    [super_name] = set(new_func.__code__.co_names) - set(meth.__code__.co_names)
+    assert isinstance(new_func.__globals__[super_name], SuperProxy)
 
 
 def test_inject_super_proxy_keeps_unrelated_closure_functions(Fool):
@@ -474,6 +488,31 @@ def test_inject_super_proxy_keeps_function_attributes(Fool):
     assert new_wrapped.__qualname__ == _Fool.meth.__wrapped__.__qualname__
     assert new_func.__qualname__ == _Fool.meth.__qualname__
     assert new_func.custom == "value"
+
+
+# -- rename super --------------------------------------------------------------
+
+def test_rename_super():
+    class _Fool:
+        def meth(self):
+            # Not a problem since this function doesn't call super()
+            def other():
+                return self.super
+
+            super().meth()
+
+    code = _rename_super(_Fool.meth.__code__, "duper")
+    assert "duper" in code.co_names
+    assert "super" not in code.co_names
+
+
+def test_rename_super_with_super_as_other_name():
+    class _Fool:
+        def meth(self):
+            super().meth(self.super)
+
+    with pytest.raises(TypeError, match="uses 'super' as a name"):
+        _rename_super(_Fool.meth.__code__, "duper")
 
 
 # -- closures ------------------------------------------------------------------
@@ -581,11 +620,11 @@ def test_copy_function():
         """Docstring."""
 
     func.custom = "value"
-    new_globals = {"foo": "bar"}
-    new_func = _copy_function(func, new_globals, None)
+    new_code = func.__code__.replace()
+    new_func = _copy_function(func, new_code, None)
     assert new_func is not func
-    assert new_func.__code__ == func.__code__
-    assert new_func.__globals__ is new_globals
+    assert new_func.__code__ is new_code
+    assert new_func.__globals__ is func.__globals__
     assert new_func.__closure__ is None
     assert new_func.__name__ == func.__name__
     assert new_func.__qualname__ == func.__qualname__
@@ -604,6 +643,6 @@ def test_copy_function_with_closure():
         return value
 
     cell = type(func.__closure__[0])(2)
-    new_func = _copy_function(func, func.__globals__, (cell,))
+    new_func = _copy_function(func, func.__code__, (cell,))
     assert new_func() == 2
     assert func() == 1

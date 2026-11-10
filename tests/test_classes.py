@@ -1,12 +1,14 @@
 # This file is part of indico-patcher.
 # Copyright (C) 2023 - 2026 UNCONVENTIONAL
 
+import contextlib
 from collections import defaultdict
 from functools import wraps
 from unittest.mock import MagicMock
 from unittest.mock import call
 
 import pytest
+from mixins import Mixin
 from sqlalchemy import Column
 from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
@@ -141,7 +143,6 @@ def test_patch_class_multiple_times(Fool):
     unpatched_methods = Fool.__unpatched__["methods"]["meth"]
     assert len(unpatched_methods) == 2
     assert unpatched_methods[0] is orig_meth
-    assert unpatched_methods[1].__code__ is _Fool1.meth.__code__
 
     # Test that the method calls are properly chained through all patches
     Fool().meth()
@@ -1185,6 +1186,94 @@ def test_patch_class_for_decorated_method_without_super_keeps_wrapped_function(F
             return "no-super"
 
     assert Fool().meth("abc") == "no-super"
+
+
+# -- globals -------------------------------------------------------------------
+
+def test_patch_class_for_method_with_super_of_module_level_patch_class(Fool, monkeypatch):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            super(_Patch, self).meth(arg)  # noqa: F821
+
+    # Bound after patching, like a patch class defined at module level
+    monkeypatch.setitem(globals(), "_Patch", _Fool)
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc")
+
+
+def test_patch_class_for_method_with_super_in_nested_function(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            def inner(self):
+                super().meth(arg)
+
+            inner(self)
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc")
+
+
+def test_patch_class_for_method_with_super_in_nested_class(Fool):
+    class Base:
+        def meth(self, arg):
+            return f"{arg}>base"
+
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self, arg):
+            class Inner(Base):
+                def meth(self, arg):
+                    return super().meth(f"{arg}>inner")
+
+            super().meth(Inner().meth(arg))
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc>inner>base")
+
+
+def test_patch_class_for_mixin_of_other_module_patched_twice(Fool):
+    @patch_class(Fool)
+    class _Fool1(Mixin):
+        pass
+
+    @patch_class(Fool)
+    class _Fool2(Mixin):
+        pass
+
+    Fool().meth("abc")
+    Fool.__probe__.assert_called_once_with("abc>mixin>mixin")
+
+
+def test_patch_class_keeps_globals_of_other_modules(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        @contextlib.contextmanager
+        def meth(self, arg):
+            super().meth(arg)
+            yield
+
+    with Fool().meth("abc"):
+        pass
+    Fool.__probe__.assert_called_once_with("abc")
+    assert not any(name.startswith("_indico_patcher_super_") for name in vars(contextlib))
+
+
+def test_patch_class_with_super_as_other_name():
+    class _Fool:
+        def meth(self):
+            return "fool"
+
+    class _Patch:
+        def meth(self):
+            return super().meth(self.super)
+
+    with pytest.raises(TypeError):
+        patch_class(_Fool)(_Patch)
+    # The failed patch leaves nothing behind that a later patch would store twice
+    assert _Fool().meth() == "fool"
+    assert not _Fool.__unpatched__["methods"]
 
 
 # -- SQLAlchemy: columns -------------------------------------------------------

@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import builtins
 import sys
+from dis import get_instructions
+from dis import hasname
 from functools import partial
+from inspect import CO_OPTIMIZED
 from types import CellType
 from types import CodeType
 from types import FrameType
@@ -221,8 +224,6 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
         raise ValueError(f"Unsupported category '{category}'")
     if unsupported_fnames := set(fnames) - SUPPORTED_DESCRIPTORS:
         raise ValueError(f"Unsupported descriptor method '{list(unsupported_fnames)[0]}'")
-    # Keep a reference to the original property-like member
-    _store_unpatched(orig_class, prop_name, category)
     # Inject super() in the property descriptor methods
     # TODO: Figure out how to avoid casting
     funcs: PropertyDescriptors | HybridPropertyDescriptors = cast(PropertyDescriptors | HybridPropertyDescriptors, {
@@ -238,6 +239,9 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
         new_prop = property(**funcs)
     else:
         new_prop = hybrid_property(**funcs)
+    # Keep a reference to the original property-like member once the patch is good,
+    # so that a failed patch leaves nothing behind
+    _store_unpatched(orig_class, prop_name, category)
     # Replace the original property-like member
     setattr(orig_class, prop_name, new_prop)
 
@@ -252,14 +256,15 @@ def _patch_methodlike(orig_class: PatchedClass, method_name: str, method: method
     """
     if category not in {"methods", "classmethods", "staticmethods"}:
         raise ValueError(f"Unsupported category '{category}'")
-    # Keep a reference to the original method-like member
-    _store_unpatched(orig_class, method_name, category)
-    # Override super() in the method globals
+    # Inject super() in the method
     # XXX: Type is casted and type checking is disabled because mypy infers the wrong types
     #      for __func__ in classmethods (https://github.com/python/mypy/issues/3482)
     func = method if isinstance(method, FunctionType) else cast(FunctionType, method.__func__)
     new_func = _inject_super_proxy(func, orig_class)
     new_method = classmethod(new_func) if isinstance(method, classmethod) else new_func
+    # Keep a reference to the original method-like member once the patch is good,
+    # so that a failed patch leaves nothing behind
+    _store_unpatched(orig_class, method_name, category)
     # Replace the original method
     setattr(orig_class, method_name, new_method)
 
@@ -271,12 +276,13 @@ def _patch_hybrid_method(orig_class: PatchedClass, method_name: str, method: hyb
     :param method_name: The name of the hybrid method to patch in the class
     :param method: The hybrid method object to replace the original member with
     """
-    # Keep a reference to the original hybrid method
-    _store_unpatched(orig_class, method_name, "hybrid_methods")
     # Inject super() in the function and the expression
     func = _inject_super_proxy(method.func, orig_class)
     # The expression is the function itself unless defined separately
     expr = func if method.expr is method.func else _inject_super_proxy(method.expr, orig_class)
+    # Keep a reference to the original hybrid method once the patch is good,
+    # so that a failed patch leaves nothing behind
+    _store_unpatched(orig_class, method_name, "hybrid_methods")
     # Replace the original hybrid method
     setattr(orig_class, method_name, hybrid_method(func, expr))
 
@@ -300,43 +306,88 @@ def _store_unpatched(orig_class: PatchedClass, member_name: str, category: str) 
 
 
 def _inject_super_proxy(func: FunctionType, orig_class: PatchedClass) -> FunctionType:
-    """Return a new function from which super() will call SuperProxy().
+    """Return a copy of a function from which super() will call SuperProxy().
 
-    Decorated functions are called from the closure of their wrappers, so the functions
-    in the closure that (directly or through their own closures) call super() from a patch
-    class are copied too. Other closure functions are kept as they are, since decorators
-    may rely on their identity.
-    This means that a decorator that keeps the identity of a function on the path to super()
-    (e.g. an outer decorator registering the inner wrapper) will see a different object.
+    Every function on the way to a super() call from a patch class (or one of its bases) is copied:
+    the function itself and, when it is decorated, the functions in the closure of its wrappers.
+    The copies keep the globals of their module. The function itself and those calling super() from
+    a patch class load a global of their own instead when they use super, bound to the SuperProxy,
+    so that super stays the built-in for any other code.
+
+    Other closure functions are kept as they are, since decorators may rely on their identity.
+    A decorator that keeps the identity of a function on the way to super() (e.g. an outer
+    decorator registering the inner wrapper) will see a different object.
 
     :param func: The function that will get SuperProxy injected
     :param orig_class: The original class that will be passed to SuperProxy
     """
     super_proxy = SuperProxy(orig_class)
+    # A name per SuperProxy, unique while the global keeps it alive, so that copies of the same code differ
+    super_name = f"_indico_patcher_super_{id(super_proxy):x}"
     patch_classes = {cls for patch_class in orig_class.__patches__ for cls in patch_class.__mro__}
     copies: dict[FunctionType, FunctionType] = {}
 
-    def copy_with_closure(fn: FunctionType, inject_proxy: bool) -> FunctionType:
+    def copy_with_closure(fn: FunctionType) -> FunctionType:
         if fn in copies:
             return copies[fn]
-        globals = {**fn.__globals__, "super": super_proxy} if inject_proxy else fn.__globals__
+        code = fn.__code__
+        # The function itself is rewritten even without a __class__ cell, since it can be
+        # defined outside the patch class and call super(_Patch, self)
+        if fn is func or _calls_patch_super(fn, patch_classes):
+            code = _rename_super(code, super_name)
+        # Only a function that loads super gets the global, so that the modules of other
+        # functions (e.g. the wrapper of a decorator) are left as they are
+        if code is not fn.__code__:
+            fn.__globals__[super_name] = super_proxy
         closure = fn.__closure__ or ()
         cells = [CellType() if _reaches_patch_super(_get_cell_contents(cell), patch_classes) else cell
                  for cell in closure]
         # Store the copy before filling its closure since functions can reference themselves
-        copies[fn] = new_func = _copy_function(fn, globals, tuple(cells) or None)
+        copies[fn] = new_func = _copy_function(fn, code, tuple(cells) or None)
         for cell, new_cell in zip(closure, cells, strict=True):
             if new_cell is not cell:
-                new_cell.cell_contents = copy_with_closure(
-                    cell.cell_contents, _calls_patch_super(cell.cell_contents, patch_classes)
-                )
+                new_cell.cell_contents = copy_with_closure(cell.cell_contents)
         # Keep __wrapped__ pointing at the copy of the wrapped function, when it was copied
         wrapped = fn.__dict__.get("__wrapped__")
         if isinstance(wrapped, FunctionType) and wrapped in copies:
             new_func.__wrapped__ = copies[wrapped]  # type: ignore[attr-defined]
         return new_func
 
-    return copy_with_closure(func, inject_proxy=True)
+    return copy_with_closure(func)
+
+
+def _rename_super(code: CodeType, name: str) -> CodeType:
+    """Return a copy of a code object that loads the global `name` instead of super.
+
+    The bytecode refers to names by their position in `co_names`, so replacing "super" there is
+    enough for `super()` to load another global. Functions defined in the code are renamed too.
+    Class bodies defined in it are left as they are, since super() in their methods is about
+    their own class.
+    """
+    # Functions and class bodies defined in the code are code objects among its constants
+    consts = list(code.co_consts)
+    for i, const in enumerate(consts):
+        # Only the code of functions is optimized, which tells it apart from class bodies
+        if isinstance(const, CodeType) and const.co_flags & CO_OPTIMIZED:
+            consts[i] = _rename_super(const, name)
+    if any(new is not old for new, old in zip(consts, code.co_consts, strict=True)):
+        code = code.replace(co_consts=tuple(consts))
+
+    # Collect the kinds of instruction that refer to the name super,
+    # e.g. LOAD_GLOBAL for `super()` and LOAD_ATTR for `self.super`
+    opnames = set()
+    for instr in get_instructions(code):
+        if instr.opcode in hasname and instr.argval == "super":
+            opnames.add(instr.opname)
+
+    # Nothing to rename when the code doesn't load super itself (e.g. only a lambda in it does)
+    if "LOAD_GLOBAL" not in opnames:
+        return code
+    # The name is stored once for all its uses, so renaming it would rename the other uses too
+    if opnames != {"LOAD_GLOBAL"}:
+        raise TypeError(f"Cannot patch '{code.co_qualname}' since it uses 'super' as a name other than super()")
+    names = [name if co_name == "super" else co_name for co_name in code.co_names]
+    return code.replace(co_names=tuple(names))
 
 
 def _inject_descriptor_super_proxy(func: Any, orig_class: PatchedClass) -> Any:
@@ -394,9 +445,9 @@ def _calls_patch_super(func: FunctionType, patch_classes: set[type]) -> bool:
     return "__class__" in cells and _get_cell_contents(cells["__class__"]) in patch_classes
 
 
-def _copy_function(func: FunctionType, globals: dict[str, Any], closure: tuple[CellType, ...] | None) -> FunctionType:
-    """Return a copy of a function with the given globals and closure."""
-    new_func = FunctionType(func.__code__, globals, func.__name__, func.__defaults__, closure)
+def _copy_function(func: FunctionType, code: CodeType, closure: tuple[CellType, ...] | None) -> FunctionType:
+    """Return a copy of a function with the given code and closure."""
+    new_func = FunctionType(code, func.__globals__, func.__name__, func.__defaults__, closure)
     # FunctionType() only takes the code, globals, name, defaults and closure, so copy the
     # rest, which includes what functools.wraps sets on wrappers
     for attr in ("__kwdefaults__", "__qualname__", "__module__", "__doc__", "__annotations__", "__type_params__"):

@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.0 (unreleased)
+
+- Fixed patched members not seeing module globals bound or mocked after patching.
+- Raised `TypeError` when patching a member that calls `super()` and uses `super` as another name.
+
 ## v0.5.1
 
 - Fixed explicit `super(cls, self)` calls on non-patch classes to behave like the built-in.

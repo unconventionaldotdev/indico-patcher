@@ -177,6 +177,52 @@ def test_subclass_patch_reset(Fool):
     assert Magician.__unpatched__ == defaultdict(lambda: defaultdict(list))
 
 
+def test_subclass_patch_reset_after_patching_twice(Fool):
+    @patch_class(Fool)
+    class _Fool1:
+        def meth(self):
+            super().meth()
+            self.__probe__()
+
+    @patch_class(Fool)
+    class _Fool2:
+        pass
+
+    class Magician(Fool):
+        pass
+
+    assert Fool.__dict__["__patches__"] == [_Fool1, _Fool2]
+    assert Fool.__dict__["__unpatched__"]["methods"]["meth"]
+    Magician().meth()
+    assert Fool.__probe__.call_count == 2
+
+
+def test_subclass_patch_reset_in_patched_subclass(Fool):
+    @patch_class(Fool)
+    class _Fool:
+        def meth(self):
+            super().meth()
+            self.__probe__()
+
+    class Magician(Fool):
+        pass
+
+    @patch_class(Magician)
+    class _Magician:
+        def meth(self):
+            super().meth()
+            self.__probe__()
+
+    class Sorcerer(Magician):
+        pass
+
+    assert Fool.__dict__["__patches__"] == [_Fool]
+    assert Magician.__dict__["__patches__"] == [_Magician]
+    assert Magician.__dict__["__unpatched__"]["methods"]["meth"]
+    Sorcerer().meth()
+    assert Fool.__probe__.call_count == 3
+
+
 # -- attributes ----------------------------------------------------------------
 
 def test_patch_class_for_attribute(Fool):

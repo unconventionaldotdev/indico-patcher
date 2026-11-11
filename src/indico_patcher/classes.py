@@ -45,7 +45,9 @@ def patch_class(orig_class: type) -> ClassWrapper:
     cls.__patches__ = cls.__dict__.get("__patches__", [])
     cls.__unpatched__ = cls.__dict__.get("__unpatched__",defaultdict(lambda: defaultdict(list)))
     # Reset patch storage for subclasses
-    cls.__init_subclass__ = classmethod(_create_subclass_patch_reset(cls.__init_subclass__))  # type: ignore[assignment]
+    # Wrap once: a second wrap would chain into the first and reset this class' own storage
+    if not getattr(cls.__dict__.get("__init_subclass__"), "__patch_reset__", False):
+        cls.__init_subclass__ = classmethod(_create_subclass_patch_reset(cls))  # type: ignore[assignment]
 
     def wrapper(patch_class: type) -> type:
         # Keep a reference to the patch class
@@ -60,13 +62,20 @@ def patch_class(orig_class: type) -> ClassWrapper:
     return wrapper
 
 
-def _create_subclass_patch_reset(orig_init_subclass: Callable) -> Callable:
+def _create_subclass_patch_reset(cls: type) -> Callable:
     """Create an __init_subclass__ method that resets patch tracking for subclasses."""
+    # Take the class' own hook, if any, from `__dict__`: reading it from the class
+    # would give a method bound to `cls` instead of the new subclass.
+    own = cls.__dict__.get("__init_subclass__")
 
     def __init_subclass__(subcls: PatchedClass, **kwargs: Any) -> None:
-        orig_init_subclass(**kwargs)
+        if own is not None:
+            own.__func__(subcls, **kwargs)
+        else:
+            super(cls, subcls).__init_subclass__(**kwargs)  # type: ignore[arg-type]
         # Reset patch tracking for subclass
         subcls.__patches__ = []
         subcls.__unpatched__ = defaultdict(lambda: defaultdict(list))
 
+    __init_subclass__.__patch_reset__ = True  # type: ignore[attr-defined]
     return __init_subclass__

@@ -345,6 +345,27 @@ def test_patch_class_for_property_with_super_in_subclass(Fool):
     assert magician.prop == "prop-fool-magician-sorcerer"
 
 
+def test_patch_class_for_property_subclass():
+    class custom_property(property):
+        def __get__(self, obj, objtype=None):
+            value = super().__get__(obj, objtype)
+            return value if obj is None else f"custom-{value}"
+
+    class Fool:
+        @custom_property
+        def prop(self):
+            return "prop"
+
+    @patch_class(Fool)
+    class _Fool:
+        @custom_property
+        def prop(self):
+            return "prop-patched"
+
+    assert isinstance(Fool.__dict__["prop"], custom_property)
+    assert Fool().prop == "custom-prop-patched"
+
+
 # -- classproperties ----------------------------------------------------------
 
 def test_patch_class_for_classproperty(Fool):

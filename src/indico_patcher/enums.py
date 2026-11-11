@@ -72,6 +72,10 @@ def patch_enum(
             return
         orig_rich_values = getattr(enum, attr)
         patch_rich_values = getattr(patch, attr)
+        # Leave the attribute alone when the patch has no values for it, so
+        # that padding doesn't turn an empty list into a non-empty one
+        if not patch_rich_values:
+            return
         # Determine padding for list of rich values
         padding_values = []
         if padding:

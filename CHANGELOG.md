@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.6.2 (unreleased)
+## v0.6.2
 
 - Required release tags to be signed.
 - Fixed patching a rich enum with padding raising `IndexError` on `css_class` when neither the enum nor the patch has CSS classes.

@@ -8,11 +8,29 @@ on:
 jobs:
   check:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - name: Check tag version
         run: |
           .github/bin/check-version.sh "${GITHUB_REF#refs/tags/v}"
+      - name: Check tag signature
+        run: |
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME")
+          [ "$(jq -r .object.type <<<"$ref")" = tag ] || { echo "::error::$GITHUB_REF_NAME is not an annotated tag"; exit 1; }
+          verified=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$(jq -r .object.sha <<<"$ref")" -q .verification.verified)
+          [ "$verified" = true ] || { echo "::error::$GITHUB_REF_NAME is not signed by a verified key"; exit 1; }
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Check tag has no release
+        # A read-only token lists published releases only, which are the ones
+        # that must never be touched; a stale draft is harmless.
+        run: |
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" -q '.[] | select(.tag_name == env.GITHUB_REF_NAME) | .id')
+          [ -z "$existing" ] || { echo "::error::$GITHUB_REF_NAME already has a release"; exit 1; }
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   build:
     needs: check

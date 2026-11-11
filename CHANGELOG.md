@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.2 (unreleased)
+
+- Required release tags to be signed.
+
 ## v0.6.1
 
 - Fixed patches of a class being reset when subclassing it after patching it twice or patching one of its subclasses.

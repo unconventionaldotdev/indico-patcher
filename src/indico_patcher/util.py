@@ -233,10 +233,8 @@ def _patch_propertylike(orig_class: PatchedClass, prop_name: str, prop: property
         for fname in fnames
     })
     new_prop: propertylike
-    if isinstance(prop, classproperty):
+    if isinstance(prop, property):
         new_prop = type(prop)(**funcs)
-    elif isinstance(prop, property):
-        new_prop = property(**funcs)
     else:
         new_prop = hybrid_property(**funcs)
     # Keep a reference to the original property-like member once the patch is good,

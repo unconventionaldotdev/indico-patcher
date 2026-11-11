@@ -4,6 +4,7 @@
 
 - Required release tags to be signed.
 - Fixed patching a rich enum with padding raising `IndexError` on `css_class` when neither the enum nor the patch has CSS classes.
+- Fixed patched properties losing their type when it is a subclass of `property`.
 
 ## v0.6.1
 

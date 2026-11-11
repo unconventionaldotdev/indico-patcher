@@ -151,6 +151,23 @@ def test_patch_richenum_with_padding(RichTarotCard):
     assert RichTarotCard.the_two_of_wands.arcana == Arcana.minor
 
 
+def test_patch_richenum_with_padding_and_empty_rich_attr():
+    class RichTarotCard(RichIntEnum):
+        __titles__ = ["The Fool"]
+        __css_classes__ = []
+        the_fool = 0
+
+    @patch_enum(RichTarotCard, padding=1000)
+    class _TarotCard(Enum):
+        __titles__ = [None, "The Magician"]
+        __css_classes__ = []
+        the_magician = 1
+
+    assert RichTarotCard.the_fool.css_class is None
+    assert RichTarotCard.the_magician.title == "The Magician"
+    assert RichTarotCard.the_magician.css_class is None
+
+
 def test_patch_enum_with_extra_attrs(RichTarotCard):
     @patch_enum(RichTarotCard, extra_attrs=("__deck__", "__meanings__",))
     class _TarotCard(Enum):

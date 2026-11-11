@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.6.1 (unreleased)
+## v0.6.1
 
 - Fixed patches of a class being reset when subclassing it after patching it twice or patching one of its subclasses.
 - Fixed `__init_subclass__` of patched classes receiving the patched class instead of the new subclass.
